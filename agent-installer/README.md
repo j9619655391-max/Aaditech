@@ -1,0 +1,137 @@
+# Aaditech Agent Installer (spec §7.2)
+
+**This runs on the Windows PCs being managed by the platform — not on your
+Ubuntu server.** That's not a design shortcut, it's what §7.2/§3.5 of the
+spec describes: the agent bundles Wazuh, Zabbix, and MeshCentral clients
+that watch Windows-specific things (`Windows\Temp`, the registry, Windows
+services), and gets pushed to the desktop/laptop fleet via GPO/Intune. The
+Ubuntu machine only ever runs the *server* side (`infra/`) — see the
+root `README.md` for that split.
+
+## One click
+
+```powershell
+# 1. Fill in your values ONCE (this is the only manual step — everything
+#    else, including all three downloads, is automatic):
+Copy-Item AgentConfig.sample.json AgentConfig.json
+notepad AgentConfig.json
+
+# 2. Run it:
+.\one-click-install.ps1
+```
+
+That's it — `one-click-install.ps1` downloads all three vendor agents
+itself (Wazuh from `packages.wazuh.com`, Zabbix from `cdn.zabbix.com`, and
+the MeshCentral agent from your own portal's MeshCentral instance) and
+installs them silently. Nothing to download by hand, no multi-script
+sequence.
+
+**Why `AgentConfig.json` can't be filled in for you:** the manager IP,
+enrollment key, and mesh ID are specific to *your* deployment — nobody
+else can know them, including this script. Same as any deploy tool:
+Ansible needs an inventory, Terraform needs variables. Once that one file
+is filled in, running it on more machines needs zero further input.
+
+**Why the MeshCentral piece is different from Wazuh/Zabbix:** Wazuh and
+Zabbix agents are public downloads from the vendor's own site — anyone can
+fetch them with just a version number. MeshCentral doesn't work that way:
+its agent binary is generated per-server and tied to a specific device
+group (mesh ID) on *your own* MeshCentral instance, so it only exists once
+your portal is up and a device group has been created in it. This isn't a
+gap in the script — it's how MeshCentral is designed to work.
+
+## One-click bundle build (for the whole fleet)
+
+Push a single `.exe` to everyone via GPO/Intune with **one click on a
+Windows build machine**:
+
+```powershell
+# (once) fill AgentConfig.json — created automatically from the sample on
+# first run; only your manager IP / enrollment key / mesh ID go here.
+.\build-agent-installer.ps1
+
+# if MeshCentral isn't up yet, build just the Wazuh+Zabbix part:
+.\build-agent-installer.ps1 -SkipMesh
+```
+
+`build-agent-installer.ps1` does everything by itself:
+- installs the WiX 4 CLI (`dotnet tool`)
+- downloads all three vendor agents into `wix/vendor/`
+- compiles `Aaditech-Agent-Setup.exe` into `dist/`
+
+**Server details are NOT baked into the .exe.** Every value in
+`wix/AaditechAgentBundle.wxs` is `bal:Overridable`, so they're passed at
+*install* time — the same `.exe` works on your localhost test server and in
+the office environment, with no rebuild. GPO/Intune example:
+
+```
+Aaditech-Agent-Setup.exe ManagerIp=10.0.0.10 ZabbixServerIp=10.0.0.10 MeshCentralUrl=https://portal.office.local:4433 WazuhEnrollKey=KEY
+```
+
+Requires admin PowerShell and the .NET SDK on the build machine (the script
+fails with a clear message if `dotnet` is missing).
+
+## Publishing to the fleet (web download page)
+
+Once built, put `dist/Aaditech-Agent-Setup.exe` on the server where the
+portal backend can serve it (host directory mounted into the container, see
+`infra/docker-compose.yml` → `AADITECH_INSTALLER_DIR`). The portal then
+exposes it:
+
+- **Web page** — `https://portal.aaditech.local/downloads` (public, no
+  login needed): a big "Download Aaditech Agent" button with size + a copyable
+  URL for GPO/Intune.
+- **Direct URL** — `https://portal.aaditech.local/api/agent-installer/download`
+  (use this as your GPO/Intune package URL).
+- **Status check** — `GET /api/agent-installer` returns JSON
+  `{available, filename, size_mb}`; `available=false` until the `.exe` is
+  actually mounted.
+
+The endpoint is intentionally public: the installer contains no secrets
+(server values are injected at install time), and fleet staff shouldn't need
+a portal account to grab it.
+
+## Mass rollout to the whole fleet (manual equivalent)
+
+`one-click-install.ps1` is the fast path for one machine or a small pilot
+ring. For pushing to the entire fleet via GPO/Intune as a single package,
+use the WiX bundle instead — same config values, compiled into one `.exe`:
+
+```
+wix build wix/AaditechAgentBundle.wxs -ext WixToolset.Bal.wixext -o Aaditech-Agent-Setup.exe
+```
+
+Requires the WiX v4+ CLI (`dotnet tool install --global wix`) and the
+three vendor MSIs placed under `wix/vendor/` (same two downloads
+`one-click-install.ps1` does automatically — for the bundle you fetch them
+once yourself, since WiX compiles them **into** the installer rather than
+downloading them at install time).
+
+A PSADT alternative (`psadt/Deploy-AaditechAgent.ps1`) is also included
+for teams that prefer that toolchain over WiX — same install behavior,
+scripted directly, reads the same `AgentConfig.json`.
+
+## What's genuinely not verified here
+
+This was all written and reviewed in a sandbox with no PowerShell and no
+network — so none of the following was actually run:
+- `one-click-install.ps1` itself — the download URLs are real, current
+  vendor URL patterns (confirmed via search), but never executed end to
+  end against a live Wazuh/Zabbix/MeshCentral deployment.
+- The WiX bundle — not compiled (no `wix` CLI here).
+- The PSADT script — not run (no `pwsh` here).
+- Exact MSI property names (`WAZUH_REGISTRATION_PASSWORD`, `SERVERACTIVE`,
+  etc.) match each vendor's documented silent-install properties, but
+  weren't confirmed against the actual MSI you'll download — if a property
+  turns out wrong, `msiexec /i wazuh-agent.msi /qn /l*v install.log` and
+  check the log.
+
+Test on one real Windows machine before pushing to the fleet.
+
+## Pilot-ring rollout (§7.2.1)
+
+Whichever path you use, don't push to the whole fleet at once.
+`GET /alerts/rollout-plan?expected_version=vX.Y.Z` (portal API) returns
+which endpoints are pilot-ring-eligible now, and which fleet endpoints are
+still waiting on the bake period / a clean pilot. That logic lives in
+`portal-backend/app/integrations/pilot_ring.py` — genuinely tested, 9/9.

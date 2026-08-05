@@ -1,0 +1,15 @@
+# Node / frontend build artifacts
+portal-frontend/node_modules/
+portal-frontend/dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets & local env
+infra/.env
+
+# OS / editor
+.DS_Store

@@ -1,0 +1,312 @@
+version: "3.9"
+
+# ============================================================================
+# Aaditech IT Monitoring & Automation Platform — Backend Deployment Stack
+# Spec version: v1.4 (single Docker host / "localhost" deployment target)
+# ============================================================================
+# All backend tools run on an ISOLATED INTERNAL NETWORK (aaditech-internal).
+# Per spec §7.6: every container has its own private network namespace, so
+# identical internal ports (e.g. several containers each on 443) are NOT a
+# conflict — only HOST-published ports must be unique, and every host port
+# below is distinct. Only the Portal's host port (443) is meant to ever be
+# exposed beyond localhost/LAN; everything else stays localhost-bound or
+# firewalled to the internal admin network (§7.6 Firewall scope).
+#
+# HTTPS everywhere from Phase 1 (v1.4): certificates are issued automatically
+# by ./setup-certs.sh (mkcert) before first `docker compose up`. See that
+# script and docs/DEPLOYMENT.md for the one-time CA install it performs.
+#
+# Secrets: run `./generate-secrets.sh` first — creates infra/.env.
+# ============================================================================
+
+networks:
+  aaditech-internal:
+    driver: bridge
+    internal: true          # no direct internet/host route — API-gateway only
+  aaditech-edge:
+    driver: bridge           # only the reverse proxy + portal sit here
+
+volumes:
+  wazuh-indexer-data:
+  zabbix-db-data:
+  glpi-db-data:
+  glpi-files:
+  ocs-db-data:
+  ocs-files:
+  grafana-data:
+  meshcentral-data:
+  certs:                     # shared mkcert-issued certs, populated by setup-certs.sh
+
+services:
+
+  # --------------------------------------------------------------------
+  # Reverse proxy — the ONLY component exposed beyond localhost (§7.6)
+  # --------------------------------------------------------------------
+  reverse-proxy:
+    image: nginx:1.27-alpine
+    container_name: aaditech-reverse-proxy
+    restart: unless-stopped
+    ports:
+      - "443:443"     # HTTPS from Phase 1 — mkcert-issued cert (v1.4)
+      - "80:80"        # redirects to 443 only
+    volumes:
+      - ./nginx/portal.conf:/etc/nginx/conf.d/default.conf:ro
+      - certs:/etc/nginx/certs:ro
+    networks:
+      - aaditech-edge
+    depends_on:
+      - portal-backend
+      - portal-frontend
+
+  # --------------------------------------------------------------------
+  # Aaditech Portal (the only UI end users see)
+  # --------------------------------------------------------------------
+  portal-backend:
+    build: ../portal-backend
+    container_name: aaditech-portal-backend
+    restart: unless-stopped
+    environment:
+      - WAZUH_API_URL=https://wazuh-manager:55000
+      - WAZUH_API_USER=${WAZUH_API_USER}
+      - WAZUH_API_PASSWORD=${WAZUH_API_PASSWORD}
+      - ZABBIX_API_URL=https://zabbix-web:8080/api_jsonrpc.php
+      - ZABBIX_API_TOKEN=${ZABBIX_API_TOKEN}
+      - GLPI_API_URL=https://glpi:80/apirest.php
+      - GLPI_APP_TOKEN=${GLPI_APP_TOKEN}
+      - GLPI_USER_TOKEN=${GLPI_USER_TOKEN}
+      - MESHCENTRAL_API_URL=https://meshcentral:443
+      - MESHCENTRAL_API_KEY=${MESHCENTRAL_API_KEY}
+      - GRAFANA_URL=https://grafana:3000
+      - GRAFANA_SERVICE_TOKEN=${GRAFANA_SERVICE_TOKEN}
+      - JWT_SECRET=${JWT_SECRET}
+      - PORTAL_ENV=production
+      # Alerting backbone (§3.6) — Telegram/Slack PRIMARY, email SECONDARY
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      # Category B quarantine policy (§3.5)
+      - QUARANTINE_STANDARD_HOLD_DAYS=7
+      - QUARANTINE_EMERGENCY_HOLD_HOURS=24
+      - QUARANTINE_NETWORK_SHARE=${QUARANTINE_NETWORK_SHARE}
+    networks:
+      - aaditech-edge
+      - aaditech-internal
+    depends_on:
+      - wazuh-manager
+      - zabbix-web
+      - glpi
+      - grafana
+
+  portal-frontend:
+    build: ../portal-frontend
+    container_name: aaditech-portal-frontend
+    restart: unless-stopped
+    networks:
+      - aaditech-edge
+
+  # --------------------------------------------------------------------
+  # Wazuh (security, FIM, CVE detection, log correlation)
+  # --------------------------------------------------------------------
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.9.0
+    container_name: aaditech-wazuh-indexer
+    restart: unless-stopped
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+    ports:
+      - "127.0.0.1:9200:9200"   # HTTPS mandatory (tool default) — localhost only, never public (§7.6)
+    networks:
+      - aaditech-internal
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.9.0
+    container_name: aaditech-wazuh-manager
+    restart: unless-stopped
+    environment:
+      - API_USERNAME=${WAZUH_API_USER}
+      - API_PASSWORD=${WAZUH_API_PASSWORD}
+    ports:
+      - "1514:1514"                  # agent event traffic (TCP, not HTTP/S)
+      - "1515:1515"                  # agent enrollment (TCP, not HTTP/S)
+      - "127.0.0.1:55000:55000"      # REST API, HTTPS by tool default, admin-only
+    networks:
+      - aaditech-internal
+    depends_on:
+      - wazuh-indexer
+
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.9.0
+    container_name: aaditech-wazuh-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5601:5601"   # direct admin access alongside portal, HTTPS, localhost-only
+    networks:
+      - aaditech-internal
+    depends_on:
+      - wazuh-indexer
+
+  # --------------------------------------------------------------------
+  # Zabbix (infra/network performance monitoring)
+  # --------------------------------------------------------------------
+  zabbix-db:
+    image: postgres:16-alpine
+    container_name: aaditech-zabbix-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=${ZABBIX_DB_PASSWORD}
+      - POSTGRES_DB=zabbix
+    volumes:
+      - zabbix-db-data:/var/lib/postgresql/data
+    networks:
+      - aaditech-internal
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:6.4-alpine
+    container_name: aaditech-zabbix-server
+    restart: unless-stopped
+    environment:
+      - DB_SERVER_HOST=zabbix-db
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=${ZABBIX_DB_PASSWORD}
+    ports:
+      - "10051:10051"   # agent-initiated active checks/traps — TCP, not HTTP/S
+    networks:
+      - aaditech-internal
+    depends_on:
+      - zabbix-db
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:6.4-alpine
+    container_name: aaditech-zabbix-web
+    restart: unless-stopped
+    environment:
+      - DB_SERVER_HOST=zabbix-db
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=${ZABBIX_DB_PASSWORD}
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_SERVER_NAME=Aaditech
+      - PHP_TZ=Asia/Kolkata
+    volumes:
+      - certs:/etc/ssl/nginx:ro
+    ports:
+      - "127.0.0.1:8082:8080"   # HTTPS from Phase 1 (mkcert), admin-only per §7.6
+    networks:
+      - aaditech-internal
+    depends_on:
+      - zabbix-server
+
+  # --------------------------------------------------------------------
+  # GLPI (ticketing, asset/license management)
+  # --------------------------------------------------------------------
+  glpi-db:
+    image: mariadb:11
+    container_name: aaditech-glpi-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${GLPI_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=glpi
+      - MYSQL_USER=glpi
+      - MYSQL_PASSWORD=${GLPI_DB_PASSWORD}
+    volumes:
+      - glpi-db-data:/var/lib/mysql
+    networks:
+      - aaditech-internal
+
+  glpi:
+    image: diouxx/glpi:10.0.15
+    container_name: aaditech-glpi
+    restart: unless-stopped
+    environment:
+      - TIMEZONE=Asia/Kolkata
+    volumes:
+      - glpi-files:/var/www/html/glpi
+      - certs:/etc/ssl/certs/mkcert:ro
+    ports:
+      - "127.0.0.1:8080:80"   # HTTPS from Phase 1 (mkcert), admin-only per §7.6
+    networks:
+      - aaditech-internal
+    depends_on:
+      - glpi-db
+
+  # --------------------------------------------------------------------
+  # OCS Inventory NG (asset discovery/inventory, feeds GLPI)
+  # NOTE: this service is listed in spec §7.6's port table but is NOT
+  # listed in §2's main technology stack table — flagged as a possible
+  # spec inconsistency. Included here because §7.6 gives it an explicit
+  # host port (8081), pending confirmation from the project owner.
+  # --------------------------------------------------------------------
+  ocs-db:
+    image: mariadb:11
+    container_name: aaditech-ocs-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${OCS_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=ocsweb
+      - MYSQL_USER=ocs
+      - MYSQL_PASSWORD=${OCS_DB_PASSWORD}
+    volumes:
+      - ocs-db-data:/var/lib/mysql
+    networks:
+      - aaditech-internal
+
+  ocs-inventory:
+    image: ocsinventory/ocsinventory-docker-image:latest
+    container_name: aaditech-ocs-inventory
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Kolkata
+      - DB_HOST=ocs-db
+      - DB_USER=ocs
+      - DB_PASSWD=${OCS_DB_PASSWORD}
+      - DB_NAME=ocsweb
+    volumes:
+      - ocs-files:/var/lib/ocsinventory-reports
+    ports:
+      - "127.0.0.1:8081:80"   # HTTPS from Phase 1 (mkcert), admin-only per §7.6
+    networks:
+      - aaditech-internal
+    depends_on:
+      - ocs-db
+
+  # --------------------------------------------------------------------
+  # MeshCentral (remote access) — HTTPS by tool default, always
+  # --------------------------------------------------------------------
+  meshcentral:
+    image: typhonragewind/meshcentral:latest
+    container_name: aaditech-meshcentral
+    restart: unless-stopped
+    volumes:
+      - meshcentral-data:/opt/meshcentral/meshcentral-data
+    ports:
+      - "127.0.0.1:4433:443"   # HTTPS mandatory (tool default), admin-only per §7.6
+    networks:
+      - aaditech-internal
+
+  # --------------------------------------------------------------------
+  # Grafana (hidden rendering engine — embedded into the portal only)
+  # --------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: aaditech-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_PROTOCOL=https
+      - GF_SERVER_CERT_FILE=/etc/certs/grafana.pem
+      - GF_SERVER_CERT_KEY=/etc/certs/grafana-key.pem
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - certs:/etc/certs:ro
+    ports:
+      - "127.0.0.1:3000:3000"   # HTTPS from Phase 1 (mkcert), admin-only per §7.6
+    networks:
+      - aaditech-internal
