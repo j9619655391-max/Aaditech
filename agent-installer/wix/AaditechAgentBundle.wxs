@@ -27,7 +27,6 @@
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
         LicenseUrl=""
-        LogoFile="branding\aaditech-logo.png"
         SuppressOptionsUI="yes"
         ShowVersion="yes" />
     </BootstrapperApplication>
