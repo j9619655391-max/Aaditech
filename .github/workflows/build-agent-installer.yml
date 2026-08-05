@@ -3,20 +3,20 @@ name: Build Agent Installer (.exe)
 # Builds Aaditech-Agent-Setup.exe (WiX Burn bundle) on Windows and publishes
 # it as a build artifact so it can be pushed to the fleet via GPO/Intune.
 #
-# Wazuh + Zabbix MSIs are vendor-hosted and reliable, so those compile on every
-# run. MeshCentral's agent binary is generated per-portal and only available
-# once your MeshCentral instance + device group are live; the workflow fetches
-# it only when AGENT_MESH_URL is set (see inputs / secrets guidance below).
+# PORTABLE BY DESIGN: server addresses are NOT baked into the .exe. Every
+# value (ManagerIp, ZabbixServerIp, MeshCentralUrl, WazuhEnrollKey) is
+# bal:Overridable, so they are passed at INSTALL time:
+#     Aaditech-Agent-Setup.exe ManagerIp=10.73.77.58 ZabbixServerIp=10.73.77.58
+#         MeshCentralUrl=https://10.73.77.58:4433 WazuhEnrollKey=...
+# Migrating to a new server IP needs NO rebuild and NO secret change — just run
+# the same .exe with the new address in the GPO/Intune command.
 #
-# Required repository secrets (Settings -> Secrets and variables -> Actions):
-#   AGENT_MANAGER_IP        Wazuh/Zabbix manager address the agents report to
-#   AGENT_WAZUH_ENROLL_KEY  Wazuh registration password
-#   AGENT_ZABBIX_SERVER_IP  Zabbix server/active address
-#   AGENT_MESH_URL          MeshCentral base URL (optional; omit to skip mesh)
-#
-# To include the MeshCentral agent at build time, uncomment the secret below
-# and set AGENT_MESH_ID. The agent is downloaded from your portal and registered
-# to that mesh device group.
+# No repository secrets are required for the default build (Wazuh+Zabbix).
+# The only build-time value that matters is the MeshCentral device group ID,
+# because the mesh agent binary itself is downloaded per-portal/group at build
+# time. To include it, run the workflow with include_mesh=true and set:
+#   AGENT_MESH_URL   e.g. https://your-server:4433
+#   AGENT_MESH_ID    the device group ID from your MeshCentral admin UI
 
 on:
   workflow_dispatch:
