@@ -43,6 +43,12 @@
     <Variable Name="ZabbixServerIp"  Type="string" bal:Overridable="yes" />
     <Variable Name="MeshCentralUrl"  Type="string" bal:Overridable="yes" />
 
+    <!-- The MeshCentral agent binary is generated per-portal and only exists
+         once your MeshCentral instance + device group are live. CI builds
+         Wazuh+Zabbix by default (reliable, vendor-hosted MSIs); add
+         -d IncludeMesh=1 on the wix build line once the portal is up and the
+         mesh agent has been fetched into wix/vendor/meshcentral-agent.exe. -->
+
     <Chain>
       <!-- 1. Wazuh agent — security/FIM/CVE endpoint component -->
       <MsiPackage Id="WazuhAgentMsi"
@@ -65,14 +71,17 @@
         <MsiProperty Name="SERVERACTIVE" Value="[ZabbixServerIp]" />
       </MsiPackage>
 
-      <!-- 3. MeshCentral agent — remote access component -->
-      <MsiPackage Id="MeshCentralAgentMsi"
-                  SourceFile="vendor\meshcentral-agent.msi"
+      <!-- 3. MeshCentral agent — remote access component (only when the
+           portal MeshCentral instance is live; see comment above). -->
+      <?if $(var.IncludeMesh) = 1 ?>
+      <ExePackage Id="MeshCentralAgentExe"
+                  SourceFile="vendor\meshcentral-agent.exe"
                   DisplayName="MeshCentral Agent"
                   Vital="yes"
-                  Permanent="no">
-        <MsiProperty Name="MESHURL" Value="[MeshCentralUrl]" />
-      </MsiPackage>
+                  Permanent="no"
+                  InstallCommand="install">
+      </ExePackage>
+      <?endif?>
     </Chain>
 
   </Bundle>

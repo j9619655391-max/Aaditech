@@ -1,0 +1,131 @@
+name: Build Agent Installer (.exe)
+
+# Builds Aaditech-Agent-Setup.exe (WiX Burn bundle) on Windows and publishes
+# it as a build artifact so it can be pushed to the fleet via GPO/Intune.
+#
+# Wazuh + Zabbix MSIs are vendor-hosted and reliable, so those compile on every
+# run. MeshCentral's agent binary is generated per-portal and only available
+# once your MeshCentral instance + device group are live; the workflow fetches
+# it only when AGENT_MESH_URL is set (see inputs / secrets guidance below).
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   AGENT_MANAGER_IP        Wazuh/Zabbix manager address the agents report to
+#   AGENT_WAZUH_ENROLL_KEY  Wazuh registration password
+#   AGENT_ZABBIX_SERVER_IP  Zabbix server/active address
+#   AGENT_MESH_URL          MeshCentral base URL (optional; omit to skip mesh)
+#
+# To include the MeshCentral agent at build time, uncomment the secret below
+# and set AGENT_MESH_ID. The agent is downloaded from your portal and registered
+# to that mesh device group.
+
+on:
+  workflow_dispatch:
+    inputs:
+      wazuh_version:
+        description: Wazuh agent version (e.g. 4.14.5)
+        required: false
+        default: '4.14.5'
+      zabbix_version:
+        description: Zabbix agent2 version (e.g. 7.4.3)
+        required: false
+        default: '7.4.3'
+      include_mesh:
+        description: Include MeshCentral agent (requires AGENT_MESH group)
+        required: false
+        default: 'false'
+        type: boolean
+  push:
+    tags:
+      - 'agent-v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Install WiX v4 CLI
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix
+          if ($LASTEXITCODE -ne 0) { dotnet tool update --global wix }
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -Append $env:GITHUB_PATH
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          wix --version
+
+      - name: Resolve versions
+        id: versions
+        shell: pwsh
+        run: |
+          $waz = "${{ inputs.wazuh_version || '4.14.5' }}"
+          $zbx = "${{ inputs.zabbix_version || '7.4.3' }}"
+          $zbxmm = ($zbx -split '\.')[0..1] -join '.'
+          "WAZUH_VERSION=$waz"        | Out-File $env:GITHUB_ENV -Encoding utf8
+          "ZABBIX_VERSION=$zbx"       | Out-File $env:GITHUB_ENV -Encoding utf8
+          "ZABBIX_MAJMIN=$zbxmm"      | Out-File $env:GITHUB_ENV -Encoding utf8
+
+      - name: Download Wazuh agent MSI
+        working-directory: agent-installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force wix\vendor | Out-Null
+          $dst = "wix\vendor\wazuh-agent.msi"
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://packages.wazuh.com/4.x/windows/wazuh-agent-$env:WAZUH_VERSION-1.msi" `
+            -OutFile $dst
+          Get-Item $dst
+
+      - name: Download Zabbix agent2 MSI
+        working-directory: agent-installer
+        shell: pwsh
+        run: |
+          $dst = "wix\vendor\zabbix-agent.msi"
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://cdn.zabbix.com/zabbix/binaries/stable/$env:ZABBIX_MAJMIN/$env:ZABBIX_VERSION/zabbix_agent2-$env:ZABBIX_VERSION-windows-amd64-openssl.msi" `
+            -OutFile $dst
+          Get-Item $dst
+
+      - name: Download MeshCentral agent (optional)
+        if: inputs.include_mesh == 'true'
+        working-directory: agent-installer
+        shell: pwsh
+        env:
+          MESH_ID: ${{ secrets.AGENT_MESH_ID }}
+        run: |
+          $meshUrl = "${{ secrets.AGENT_MESH_URL }}/meshagents?id=4&meshid=$env:MESH_ID"
+          Invoke-WebRequest -UseBasicParsing -Uri $meshUrl -OutFile wix\vendor\meshcentral-agent.exe
+          Get-Item wix\vendor\meshcentral-agent.exe
+
+      - name: Build bundle
+        id: build
+        working-directory: agent-installer
+        shell: pwsh
+        env:
+          INCLUDE_MESH: ${{ inputs.include_mesh == 'true' && '1' || '0' }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          wix build wix\AaditechAgentBundle.wxs -ext WixToolset.Bal.wixext -d "IncludeMesh=$env:INCLUDE_MESH" -o dist\Aaditech-Agent-Setup.exe
+          if ($LASTEXITCODE -ne 0) { throw "wix build failed (exit $LASTEXITCODE)" }
+          Get-Item dist\Aaditech-Agent-Setup.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aaditech-Agent-Setup.exe
+          path: agent-installer/dist\Aaditech-Agent-Setup.exe
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: agent-installer/dist\Aaditech-Agent-Setup.exe
