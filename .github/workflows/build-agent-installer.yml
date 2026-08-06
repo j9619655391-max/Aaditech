@@ -56,8 +56,10 @@ jobs:
       - name: Install WiX v4 CLI
         shell: pwsh
         run: |
-          dotnet tool install --global wix
-          if ($LASTEXITCODE -ne 0) { dotnet tool update --global wix }
+          dotnet tool install --global wix --version 4.0.2
+          if ($LASTEXITCODE -ne 0) { dotnet tool install --global wix --version 4.0.2 --force }
+          wix extension add --global WixToolset.Bal.wixext/4.0.2
+          if ($LASTEXITCODE -ne 0) { throw "wix extension add failed" }
           "$env:USERPROFILE\.dotnet\tools" | Out-File -Append $env:GITHUB_PATH
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
           wix --version
