@@ -71,6 +71,39 @@ Aaditech-Agent-Setup.exe ManagerIp=10.0.0.10 ZabbixServerIp=10.0.0.10 MeshCentra
 Requires admin PowerShell and the .NET SDK on the build machine (the script
 fails with a clear message if `dotnet` is missing).
 
+## CI build (GitHub Actions) — recommended
+
+You don't need a Windows build machine at all. The repo ships a workflow
+(`.github/workflows/build-agent-installer.yml`) that compiles the same
+`Aaditech-Agent-Setup.exe` on a `windows-latest` runner:
+
+- **Manual trigger** — Actions → "Build Agent Installer (.exe)" → Run workflow
+  (inputs: Wazuh/Zabbix versions, `include_mesh`).
+- **Tag trigger** — push `agent-v*` (e.g. `agent-v1.0.0`); the build runs and
+  the `.exe` is attached to a GitHub Release for download:
+  `https://github.com/<org>/<repo>/releases/tag/agent-v1.0.0`
+
+The workflow pins **WiX 4.0.2** and its matching Bal extension (newer WiX
+versions moved/renamed the bootstrapper extension). Vendor MSIs are mirrored
+as assets on the `agent-installer-vendor-v1` release because
+`packages.wazuh.com` returns S3 `AccessDenied` (403) to GitHub runner IPs —
+the workflow downloads them from that mirror instead. Regenerate the mirror
+whenever you upgrade agent versions.
+
+**No secrets required for the default (Wazuh+Zabbix) build.** Server
+addresses stay out of the `.exe` entirely — you pass them at install time:
+
+```
+Aaditech-Agent-Setup.exe ManagerIp=10.73.77.58 ZabbixServerIp=10.73.77.58 WazuhEnrollKey=...
+```
+
+So when you migrate to a new server IP you **don't rebuild anything** — just
+run the same `.exe` with the new address in the GPO/Intune command.
+
+Only the MeshCentral piece is baked at build time (its agent binary is
+generated per-portal/device-group), so including it needs two extra secrets
+(`AGENT_MESH_URL`, `AGENT_MESH_ID`) and the `include_mesh` input on.
+
 ## Publishing to the fleet (web download page)
 
 Once built, put `dist/Aaditech-Agent-Setup.exe` on the server where the
@@ -118,7 +151,10 @@ network — so none of the following was actually run:
 - `one-click-install.ps1` itself — the download URLs are real, current
   vendor URL patterns (confirmed via search), but never executed end to
   end against a live Wazuh/Zabbix/MeshCentral deployment.
-- The WiX bundle — not compiled (no `wix` CLI here).
+- **The WiX bundle — now compiled on CI.** The GitHub Actions workflow builds
+  `Aaditech-Agent-Setup.exe` successfully (see Artifacts/Releases), so the WiX
+  authoring *does* compile. What's still unverified is a live silent install
+  on a real Windows endpoint.
 - The PSADT script — not run (no `pwsh` here).
 - Exact MSI property names (`WAZUH_REGISTRATION_PASSWORD`, `SERVERACTIVE`,
   etc.) match each vendor's documented silent-install properties, but
