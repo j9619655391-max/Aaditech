@@ -77,21 +77,41 @@ jobs:
         working-directory: agent-installer
         shell: pwsh
         run: |
+          function Get-WithRetry($Uri, $OutFile) {
+            for ($i = 1; $i -le 5; $i++) {
+              try {
+                Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -ErrorAction Stop
+                return
+              } catch {
+                Write-Host "download attempt $i failed: $($_.Exception.Message)"
+                if ($i -eq 5) { throw }
+                Start-Sleep -Seconds ($i * 10)
+              }
+            }
+          }
           New-Item -ItemType Directory -Force wix\vendor | Out-Null
           $dst = "wix\vendor\wazuh-agent.msi"
-          Invoke-WebRequest -UseBasicParsing `
-            -Uri "https://packages.wazuh.com/4.x/windows/wazuh-agent-$env:WAZUH_VERSION-1.msi" `
-            -OutFile $dst
+          Get-WithRetry "https://packages.wazuh.com/4.x/windows/wazuh-agent-$env:WAZUH_VERSION-1.msi" $dst
           Get-Item $dst
 
       - name: Download Zabbix agent2 MSI
         working-directory: agent-installer
         shell: pwsh
         run: |
+          function Get-WithRetry($Uri, $OutFile) {
+            for ($i = 1; $i -le 5; $i++) {
+              try {
+                Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -ErrorAction Stop
+                return
+              } catch {
+                Write-Host "download attempt $i failed: $($_.Exception.Message)"
+                if ($i -eq 5) { throw }
+                Start-Sleep -Seconds ($i * 10)
+              }
+            }
+          }
           $dst = "wix\vendor\zabbix-agent.msi"
-          Invoke-WebRequest -UseBasicParsing `
-            -Uri "https://cdn.zabbix.com/zabbix/binaries/stable/$env:ZABBIX_MAJMIN/$env:ZABBIX_VERSION/zabbix_agent2-$env:ZABBIX_VERSION-windows-amd64-openssl.msi" `
-            -OutFile $dst
+          Get-WithRetry "https://cdn.zabbix.com/zabbix/binaries/stable/$env:ZABBIX_MAJMIN/$env:ZABBIX_VERSION/zabbix_agent2-$env:ZABBIX_VERSION-windows-amd64-openssl.msi" $dst
           Get-Item $dst
 
       - name: Download MeshCentral agent (optional)
