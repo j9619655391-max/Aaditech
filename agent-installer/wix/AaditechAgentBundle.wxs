@@ -20,7 +20,7 @@
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
 
   <Bundle Name="Aaditech Agent"
-          Version="!(bind.FileVersion.WazuhAgentMsi)"
+          Version="1.0.0.0"
           Manufacturer="Aaditech"
           UpgradeCode="{b06067a6-6ed7-48a1-938b-da2c478f5157}">
 
