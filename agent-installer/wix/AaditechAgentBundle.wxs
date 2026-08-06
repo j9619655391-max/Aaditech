@@ -27,7 +27,7 @@
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
         LicenseUrl=""
-        Theme="hyperlink"
+        Theme="hyperlinkLicense"
         ShowVersion="yes" />
     </BootstrapperApplication>
 
