@@ -114,15 +114,15 @@ jobs:
 
       - name: Build bundle
         id: build
-        working-directory: agent-installer
+        working-directory: agent-installer/wix
         shell: pwsh
         env:
           INCLUDE_MESH: ${{ inputs.include_mesh == 'true' && '1' || '0' }}
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          wix build wix\AaditechAgentBundle.wxs -ext WixToolset.Bal.wixext -d "IncludeMesh=$env:INCLUDE_MESH" -o dist\Aaditech-Agent-Setup.exe
+          New-Item -ItemType Directory -Force ..\dist | Out-Null
+          wix build AaditechAgentBundle.wxs -ext WixToolset.Bal.wixext -d "IncludeMesh=$env:INCLUDE_MESH" -o ..\dist\Aaditech-Agent-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw "wix build failed (exit $LASTEXITCODE)" }
-          Get-Item dist\Aaditech-Agent-Setup.exe
+          Get-Item ..\dist\Aaditech-Agent-Setup.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
