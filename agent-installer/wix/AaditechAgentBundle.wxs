@@ -27,7 +27,7 @@
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
         LicenseUrl=""
-        SuppressOptionsUI="yes"
+        Theme="hyperlink"
         ShowVersion="yes" />
     </BootstrapperApplication>
 
@@ -37,10 +37,10 @@
 
     <!-- Values every agent needs — supplied at build/deploy time, never
          hardcoded. Matches infra/generate-secrets.sh output names. -->
-    <Variable Name="ManagerIp"       Type="string" bal:Overridable="yes" />
-    <Variable Name="WazuhEnrollKey"  Type="string" bal:Overridable="yes" />
-    <Variable Name="ZabbixServerIp"  Type="string" bal:Overridable="yes" />
-    <Variable Name="MeshCentralUrl"  Type="string" bal:Overridable="yes" />
+    <Variable Name="ManagerIp"       bal:Overridable="yes" />
+    <Variable Name="WazuhEnrollKey"  bal:Overridable="yes" />
+    <Variable Name="ZabbixServerIp"  bal:Overridable="yes" />
+    <Variable Name="MeshCentralUrl"  bal:Overridable="yes" />
 
     <!-- The MeshCentral agent binary is generated per-portal and only exists
          once your MeshCentral instance + device group are live. CI builds
