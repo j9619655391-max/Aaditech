@@ -5,6 +5,56 @@ Last updated: session 7 (full live deploy executed).
 
 Legend: ✅ Done & verified (executed) · 🟡 Code complete, not executable-without-a-live-dependency · ⬜ Not started · ⚠️ Flagged issue/gap
 
+## Session 9: agent installer built on GitHub Actions (CI)
+
+The `.exe` is now compiled in CI instead of a one-off Windows machine — the
+WiX bundle actually *compiles and ships* end to end:
+
+### ✅ `build-agent-installer.yml` (NEW) — workflow
+
+- Runs on `windows-latest`; `workflow_dispatch` (manual, with Wazuh/Zabbix
+  version + `include_mesh` inputs) and tag trigger (`agent-v*` → also creates
+  a GitHub Release with the `.exe`).
+- Pins **WiX 4.0.2** + matching `WixToolset.Bal.wixext/4.0.2` (newer WiX moved
+  the bootstrapper extension — `-ext WixToolset.Bal.wixext` alone resolves to
+  nothing on a fresh runner).
+- Vendor MSIs are mirrored as assets on the `agent-installer-vendor-v1`
+  release because `packages.wazuh.com` returns S3 `AccessDenied` (403) to
+  GitHub runner egress IPs (URL is fine from normal residential IPs). Regenerate
+  the mirror when bumping agent versions.
+- Default build (Wazuh+Zabbix) needs **no repository secrets** — server values
+  are passed at install time, so IP migration = new deploy command, not rebuild.
+  MeshCentral inclusion is opt-in (`include_mesh`) and needs `AGENT_MESH_URL` +
+  `AGENT_MESH_ID`.
+- First successful build: **run 31058969270 → `Aaditech-Agent-Setup.exe` (21.8 MB)
+  artifact**; tag `agent-v1.0.0` → Release with the `.exe` (22.2 MB).
+
+### ✅ `AaditechAgentBundle.wxs` — fixed to actually compile
+
+First-ever successful compile surfaced latent authoring bugs (none had been run):
+- `LogoFile="branding\aaditech-logo.png"` referenced a non-existent file → removed.
+- WiX v4 schema: `WixStandardBootstrapperApplication` needs `Theme` (legal values
+  are `hyperlinkLicense`, etc.), `Variable` with `Type` requires `Value` (dropped
+  `Type` on the overridables), and `Bundle/@Version` can't use
+  `!(bind.FileVersion...)` on an MsiPackage → hardcoded `1.0.0.0`.
+- MeshCentral package is now behind `<?if $(var.IncludeMesh) = 1 ?>`; the agent
+  binary is per-portal so it's opt-in, and it's an ExePackage (not an MsiPackage).
+
+### ✅ Docs updated
+
+`agent-installer/README.md` — new "CI build (GitHub Actions) — recommended"
+section (trigger paths, WiX pin, vendor mirror, no-secrets default, IP-migration
+workflow); "What's genuinely not verified" now notes the bundle compiles on CI
+with only live silent-install left to confirm on a real Windows endpoint.
+
+### ⚠️ Still open
+
+- Live silent-install test of `Aaditech-Agent-Setup.exe` on a real Windows
+  endpoint (the MSI property names are unverified against the actual MSIs).
+- Wazuh enrollment: `AGENT_WAZUH_ENROLL_KEY` only works once the manager's
+  `authd` enrollment password is set to the same value — not yet wired into
+  the stack.
+
 ## Session 8: agent-installer distribution + one-click bundle build
 
 Fleet rollout of the agent is now fully wired, from "compile once on a Windows
