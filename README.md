@@ -4,7 +4,7 @@ Implements spec v1.4. Two machine roles — read this before running anything:
 
 | | Runs on | One-click entry point |
 |---|---|---|
-| **Server stack** (Wazuh, Zabbix, GLPI, MeshCentral, Grafana, Portal) | **Your Ubuntu Docker host** | `cd infra && ./setup.sh` |
+| **Server stack** (Wazuh, Zabbix, GLPI, MeshCentral, Grafana, Portal) | **Your Ubuntu Docker host** | `cd infra && ./install.sh` — git pull, then this one command: a setup wizard page (company, admin login, local IP, notification email) generates all tokens/certs/keys automatically, then the full stack comes up |
 | **Agent** (Wazuh/Zabbix/MeshCentral endpoint components) | **Each Windows PC being monitored** | `cd agent-installer && .\one-click-install.ps1` |
 
 These are not two halves of the same install — they're two different
@@ -17,10 +17,9 @@ PowerShell at all.
 ```
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │   Ubuntu Docker host     │ HTTPS   │   Windows endpoint(s)     │
-│   ./setup.sh — one cmd   │◄───────►│   .\one-click-install.ps1 │
-│   Portal, Wazuh, Zabbix, │  agent  │   Wazuh agent, Zabbix     │
-│   GLPI, MeshCentral,     │ traffic │   agent, MeshCentral      │
-│   Grafana (all Docker)   │         │   agent (all installed)   │
+│   ./install.sh — one cmd │◄───────►│   .\one-click-install.ps1 │
+│   (setup wizard → full   │  agent  │   Wazuh agent, Zabbix     │
+│   stack + all services)  │ traffic │   agent, MeshCentral      │
 └─────────────────────────┘         └──────────────────────────┘
 ```
 
@@ -29,10 +28,14 @@ PowerShell at all.
 **1. Server (Ubuntu):**
 ```bash
 cd infra
-./setup.sh
+./install.sh
 ```
-One command — generates secrets, sets up HTTPS certs, brings up every
-container, waits for the portal to be healthy. Details:
+One command. It starts a one-time **setup wizard** at
+`http://localhost:8080/setup` where you enter company name, admin login,
+the server IP, and your notification email (provider auto-configured —
+gmail / hotmail / office365 / hostinger — just username + password). All
+tokens, certificates, endpoints and the agent enrollment key are generated
+automatically; then the full stack comes up. Details:
 `docs/DEPLOYMENT.md`.
 
 **2. Each Windows endpoint:**

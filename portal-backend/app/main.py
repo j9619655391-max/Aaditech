@@ -10,15 +10,28 @@ API docs (auto):  http://localhost:8000/docs
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
 
-from app import agent_commands, cleanup_store
+from app import agent_commands, cleanup_store, users
 from app.config import settings
-from app.routers import alerts, auth_sso, cleanup, dashboards, downloads, metrics, remote, tickets
+from app.routers import (
+    alerts,
+    auth_local,
+    auth_sso,
+    cleanup,
+    dashboards,
+    downloads,
+    metrics,
+    remote,
+    setup,
+    tickets,
+)
 
 # Point the persistent stores at the configured SQLite file ("" => in-memory).
 # Must run before any router handler touches them.
 cleanup_store.init_db(settings.db_path)
 agent_commands.init_db(settings.db_path)
+users.init_db(settings.db_path)
 
 app = FastAPI(
     title="Aaditech IT Monitoring & Automation Platform — Portal API",
@@ -38,6 +51,8 @@ app.add_middleware(
 )
 
 app.include_router(auth_sso.router, prefix="")
+app.include_router(auth_local.router, prefix="")
+app.include_router(setup.router, prefix="")
 app.include_router(alerts.router, prefix="")
 app.include_router(metrics.router, prefix="")
 app.include_router(tickets.router, prefix="")
@@ -45,6 +60,25 @@ app.include_router(cleanup.router, prefix="")
 app.include_router(remote.router, prefix="")
 app.include_router(dashboards.router, prefix="")
 app.include_router(downloads.router, prefix="")
+
+
+# ---------------------------------------------------------------------------
+# Setup wizard page — served by the temporary bootstrap service (SETUP_MODE)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/setup", include_in_schema=False)
+async def setup_page():
+    if not settings.setup_mode:
+        return RedirectResponse(url="/login")
+    return FileResponse(setup.SETUP_HTML, media_type="text/html")
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    if settings.setup_mode:
+        return RedirectResponse(url="/setup")
+    return {"service": "aaditech-portal-backend", "status": "ok"}
 
 
 @app.get("/health")

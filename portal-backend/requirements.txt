@@ -5,6 +5,7 @@ pydantic==2.9.2
 pydantic-settings==2.5.2
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1          # pin: passlib 1.7.4 is incompatible with bcrypt>=4.1 (72-byte error)
 python-multipart==0.0.9
 
 # Testing

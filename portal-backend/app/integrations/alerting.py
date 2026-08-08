@@ -28,6 +28,10 @@ critical path.
 """
 from __future__ import annotations
 
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+
 import httpx
 
 from app import ms_oauth
@@ -77,20 +81,54 @@ async def send_alert(message: str, portal_link: str | None = None) -> dict:
     return {"telegram_delivered": telegram_ok, "slack_delivered": slack_ok}
 
 
+def smtp_configured() -> bool:
+    """True when the setup wizard has configured an SMTP email channel."""
+    return bool(settings.smtp_host and settings.smtp_username and settings.smtp_from_address)
+
+
+def send_smtp_email(subject: str, body: str, recipients: list[str]) -> bool:
+    """
+    Sends an email over SMTP using the credentials the one-click setup wizard
+    collected (host/port/TLS from the provider preset, plus username/password).
+    Returns True on success; never raises — the caller treats email as the
+    secondary/reporting channel.
+    """
+    if not smtp_configured():
+        return False
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = settings.smtp_from_address
+    msg["To"] = ", ".join(recipients)
+
+    try:
+        context = ssl.create_default_context()
+        if settings.smtp_use_tls == "ssl":
+            with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, context=context, timeout=15) as server:
+                server.login(settings.smtp_username, settings.smtp_password)
+                server.sendmail(settings.smtp_from_address, recipients, msg.as_string())
+        else:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
+                if settings.smtp_use_tls == "starttls":
+                    server.starttls(context=context)
+                server.login(settings.smtp_username, settings.smtp_password)
+                server.sendmail(settings.smtp_from_address, recipients, msg.as_string())
+        return True
+    except Exception:
+        # Reporting channel — a failure here is observable but not critical.
+        return False
+
+
 async def send_report_email(subject: str, body: str, recipients: list[str]) -> bool:
     """
-    Sends a SECONDARY-channel scheduled report/digest via Microsoft Graph
-    (/sendMail). NEVER call this for time-sensitive alerts — use
-    send_alert() instead (the O365 channel is independent of the Telegram/
-    Slack primary backbone, so a failure here degrades reporting only).
-
-    The HTTP/OAuth2 logic (client-credentials grant, stdlib-only) lives in
-    app/ms_oauth.py so it's unit-testable offline. Requires infra/.env
-    configuration from the Phase 0 Azure app registration spike (§6):
-    AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID, plus an app
-    registered with the `Mail.Send` application permission on the target
-    tenant. With no config it returns False without making a network call.
+    Sends a SECONDARY-channel scheduled report/digest. Uses the setup wizard's
+    SMTP channel if configured; falls back to Microsoft Graph (/sendMail) when
+    Azure is configured instead. NEVER call this for time-sensitive alerts —
+    use send_alert() instead (see module docstring).
     """
+    if smtp_configured():
+        return send_smtp_email(subject, body, recipients)
+
     if not ms_oauth.azure_configured():
         # Fails soft — this is explicitly NOT on the critical alerting path
         # (§3.6). No config => nothing to send.

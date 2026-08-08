@@ -36,6 +36,20 @@ class Settings(BaseSettings):
     jwt_expiry_minutes: int = 480
     portal_env: str = "development"
 
+    # Deployment identity (set by the one-click setup wizard)
+    company_name: str = ""
+    portal_ip: str = ""
+    wazuh_enroll_key: str = ""
+
+    # Email notification channel (SMTP) — auto-filled by the setup wizard from
+    # the chosen provider preset (gmail/hotmail/office365/hostinger).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = ""
+    smtp_use_tls: str = "starttls"   # "starttls" | "ssl" | "none"
+
     # Alerting backbone (§3.6) — Telegram/Slack primary, empty string disables a channel
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -64,6 +78,12 @@ class Settings(BaseSettings):
     # Aaditech-Agent-Setup.exe lives (env-mounted directory). Empty/default
     # => installer reports "not available" instead of a false download.
     installer_dir: str = Field(default="", validation_alias="AADITECH_INSTALLER_DIR")
+
+    # One-click setup (bootstrap) mode — set only on the temporary `setup`
+    # service. When true, the backend serves the setup wizard instead of the
+    # normal portal, and can write infra/.env via the mounted host directory.
+    setup_mode: bool = Field(default=False, validation_alias="SETUP_MODE")
+    infra_dir: str = Field(default="", validation_alias="INFRA_DIR")
 
     class Config:
         env_file = ".env"

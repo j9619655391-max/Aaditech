@@ -53,6 +53,21 @@ GRAFANA_SERVICE_TOKEN=$(rand)
 # Portal
 JWT_SECRET=$(rand)
 
+# One-click setup (filled by the setup wizard; only the random enrollment key
+# is pre-generated here so every deploy has a unique agent enroll key):
+WAZUH_ENROLL_KEY=$(rand)
+COMPANY_NAME=
+PORTAL_IP=
+
+# Email notification channel (SMTP) — auto-filled from the wizard's provider
+# preset. Blank => email notifications disabled.
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_ADDRESS=
+SMTP_USE_TLS=starttls
+
 # Alerting backbone (§3.6) — Telegram/Slack are PRIMARY and must be filled in
 # manually (bot token / webhook come from your own Telegram bot & Slack app —
 # these cannot be auto-generated). Leave blank to disable a channel.

@@ -17,6 +17,35 @@ separately (`agent-installer/README.md`).
 
 ## First-time setup
 
+The recommended path is now the **one-click wizard** — `git pull` then a
+single command, and after `docker compose` you land on a setup page:
+
+```bash
+cd infra
+./install.sh
+```
+
+`install.sh` brings up ONLY a temporary `setup` service and prints the wizard
+URL — **http://localhost:8080/setup**. You fill in:
+
+- Company name
+- Admin username + password (this becomes the local portal login)
+- Local server IP (used for the portal URL, agents, MeshCentral)
+- Notification email — pick your provider (**gmail / hotmail / office365 /
+  hostinger**) and enter only the mailbox **username + password**; the SMTP
+  host, port and TLS mode are configured automatically from the preset.
+
+Everything else — all service tokens, the Wazuh agent enrollment key, the
+agent installer answer file (`infra/agent-config.json`), HTTPS certificates
+(with your IP as a SAN), the admin account — is **generated automatically**
+on submit. `install.sh` then stops the wizard, issues certs, and starts the
+full 15-container stack, waiting for the portal to report healthy.
+
+Re-running `install.sh` is safe: existing `.env` secrets and certs are reused,
+and the wizard is skipped once `.provisioned` exists.
+
+### Original manual path
+
 ```bash
 cd infra
 ./setup.sh

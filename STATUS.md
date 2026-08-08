@@ -1,9 +1,76 @@
 # Aaditech Platform — Build Status
 
 Spec version implemented against: **v1.4** (Aaditech_IT-Monitoring-Automation-Platform-Spec_v1_4.docx)
-Last updated: session 7 (full live deploy executed).
+Last updated: session 10 (one-click setup wizard, live-tested end to end).
 
 Legend: ✅ Done & verified (executed) · 🟡 Code complete, not executable-without-a-live-dependency · ⬜ Not started · ⚠️ Flagged issue/gap
+
+## Session 10: one-click setup — wizard generates everything, no manual config
+
+`git pull` → `./install.sh` → enter 5 fields in a wizard → full 15-container
+stack comes up. All secrets, certs, the admin account and the agent installer
+answer file are generated automatically. **Executed live end to end.**
+
+### ✅ `infra/install.sh` (NEW) — the one command
+
+- Brings up a temporary `setup` service (no TLS needed — pre-provision, so no
+  chicken-and-egg with the proxy) and prints **http://localhost:8080/setup**.
+- Polls `POST /api/setup/status` until the wizard is completed, then stops the
+  setup service, runs `setup-certs.sh` (cert for the real stack), issues
+  `docker compose up -d`, and waits for the portal at
+  `https://localhost/api/health` (with `-f`). Safe to re-run: skips the wizard
+  once `.provisioned` exists, reuses existing `.env` secrets + certs.
+
+### ✅ Setup wizard (backend `app/routers/setup.py` + static UI)
+
+- `GET /api/setup/status` → `{configured, provisioned}` (frontend redirects to
+  `/login` once done; the reverse proxy blocks the backend route when
+  configured).
+- `POST /api/setup/submit` — one endpoint that **runs the whole provisioning**:
+  writes the full `.env` (random secrets, `AZURE_*` emptied, DB/volumes, the
+  user's SMTP preset expanded to host/port/TLS, company + admin creds), stores
+  the admin as a local login (bcrypt), writes `agent-config.json` (enrollment
+  key = `AGENT_ENROLLMENT_KEY`, mesh URL/ID), creates `.provisioned`, re-issues
+  certs (now with the local IP as SAN) and returns `{admin_username}`.
+- `app/routers/auth_local.py` (NEW) — `POST /auth/login` with a local account,
+  same JWT shape as SSO; also proves the bcrypt dependency works.
+- `app/users.py` (NEW) — SQLite `users` table + `create_user` (idempotent
+  upsert) + `verify_credentials`.
+- Static UI: `app/static/setup.html` (single-file, inline JS) — provider-aware
+  SMTP form (gmail / hotmail / office365 / hostinger presets auto-fill host,
+  port, TLS).
+
+### ✅ SMTP presets
+
+`app/integrations/alerting.py` — `ALERT_SMTP_PRESETS` and a
+`resolve_smtp_config(provider, email, password)` helper; `send_report_email`
+uses it, so `setup.sh`/`generate-secrets.sh`'s `SMTP_*` env plumbing
+(added this session) actually drives a working `smtplib` send. SMTP
+connectivity to an internet host is **not** verified without real creds — the
+smtplib call path is unit-tested with a stubbed SMTP.
+
+### ✅ Live end-to-end test (real Docker, real certs, real DB)
+
+- Full stack brought up with the temp setup profile; wizard exercised against
+  the real portal-backend container: status flow, provisioning submit, SMTP
+  preset expansion, and the auto-config cert re-issue with the test IP as SAN.
+- Local login verified against the running DB, then cleaned up.
+- **New tests: 17 (89 total backend, all green)** — `test_users.py` (4),
+  `test_auth_local.py` (3), `test_setup.py` (10). Frontend untouched this session.
+- Fixed alongside: `setup-certs.sh` now chmods certs to 644 and re-issues with
+  the IP SAN; `generate-secrets.sh` gained the `SMTP_*`/`AGENT_ENROLLMENT_KEY`
+  plumbing install.sh relies on.
+
+### ⚠️ Still open
+
+- Real SMTP **send** still unverified against gmail/hotmail/office365/hostinger
+  (needs the customer's actual mailbox credentials at deploy time).
+- `zabbix-server` reports `cannot use database "zabbix": its "users" table is
+  empty` on this host — pre-existing DB-schema mismatch from an earlier compose
+  change, unrelated to the wizard; portal/grafana healthy.
+- Aziz's `aziz.hassan@aaditech.com` local login will be created automatically
+  by the first real `./install.sh` run (wizard admin field) — the sandbox test
+  admin was removed.
 
 ## Session 9: agent installer built on GitHub Actions (CI)
 
@@ -259,8 +326,9 @@ Everything else below was actually run and is marked ✅.
 | `docker-compose.yml` | ✅ | v1.4, 9 services; only `reverse-proxy` exposes 443, isolated internal network, HTTPS everywhere from Phase 1, §7.6 port table, OCS Inventory included. |
 | `nginx/portal.conf` | ✅ | 80→443, `/`→frontend, `/api/`→backend, `/api/remote/ws/`→MeshCentral WebSocket. |
 | `generate-secrets.sh` | ✅ | Produces `.env` with all v1.4 secrets + encrypted placeholder email/Azure stubs. |
-| `setup-certs.sh` | 🟡 | mkcert + per-service certs; bash-syntax-checked, needs ckg+mkcert to run. |
-| `setup.sh` | 🟡 | Preflight → secrets → certs → `compose up -d` → wait on `/health`. |
+| `setup-certs.sh` | ✅ executed | mkcert + per-service certs; non-root safe; chmod 644 + IP SAN re-issue (session 10). |
+| `setup.sh` | ✅ executed | Preflight → secrets → certs → `compose up -d` → wait on `/api/health`. |
+| `install.sh` | ✅ executed (NEW session 10) | **One-click:** wizard at :8080 → auto-provision → full stack; safe re-run via `.provisioned`. |
 | `certs/` | ✅ | Pre-generated mkcert-style certs committed. |
 
 ### Portal Backend (`portal-backend/`)
@@ -290,7 +358,10 @@ Everything else below was actually run and is marked ✅.
 | `app/routers/downloads.py` | ✅ executed 4/4 | **NEW (session 8)** public agent-installer info + download; 404 when not published. |
 | `app/routers/cleanup.py` | ✅ executed | scan-submit/list/approve/restore/purge + agent command poll/ack/complete. |
 | `app/routers/auth_sso.py` | ✅ offline / 🟡 live | Real login/callback; live handshake needs a tenant. |
-| `tests/` (13 files) | ✅ 72/72 | **14 files (NEW test_downloads.py) all executed and green via pytest.** |
+| `app/routers/auth_local.py` | ✅ executed 3/3 (NEW session 10) | Local login for the wizard admin; same JWT shape as SSO. |
+| `app/routers/setup.py` | ✅ executed 10/10 (NEW session 10) | `/api/setup/status` + `/api/setup/submit` — full auto-provision (env, admin, agent-config, certs). |
+| `app/users.py` | ✅ executed 4/4 (NEW session 10) | SQLite users + bcrypt `create_user` / `verify_credentials`. |
+| `tests/` (16 files) | ✅ 89/89 | **All executed and green via pytest (session 10: +test_users, +test_auth_local, +test_setup).** |
 
 ### Self-Healing (`self-healing/`)
 | Item | Status | Notes |
@@ -348,10 +419,11 @@ Everything else below was actually run and is marked ✅.
 ## Test execution summary (cumulative, definitive)
 
 ```
-ALL backend tests executed via pytest:  72/72 PASS across 14 files
+ALL backend tests executed via pytest:  89/89 PASS across 16 files
 
 PASS: test_agent_commands.py       8/8   (+2 QUARANTINE tests)
 PASS: test_auth.py                 3/3
+PASS: test_auth_local.py           3/3  (session 10, NEW)
 PASS: test_cleanup_router.py       4    (RBAC approve deny, lifecycle)
 PASS: test_cleanup_store.py        9/9
 PASS: test_downloads.py            4/4  (session 8, NEW)
@@ -360,7 +432,9 @@ PASS: test_main.py                6
 PASS: test_meshcentral_client.py   3/3
 PASS: test_persistence.py          3/3  (session 5, new)
 PASS: test_pilot_ring.py           9/9
+PASS: test_setup.py               10/10 (session 10, NEW)
 PASS: test_sso_email.py            6/6  (session 5, new)
+PASS: test_users.py                4/4  (session 10, NEW)
 PASS: test_version_drift.py        5/5
 PASS: test_wazuh_client.py         4/4
 PASS: test_zabbix_client.py        4/4
@@ -376,17 +450,22 @@ PowerShell functional (pwsh 7.4.6):
 
 ## Recommended next steps (in order)
 
-1. **DONE (session 6-8):** full backend (68/68 → now **72/72**) + frontend (11/11
-   → now **12/12**) + PowerShell Category B flows executed; WiX UpgradeCode set;
-   `index.html` + frontend Dockerfile added; **full stack deployed via
-   `setup.sh`** (15 containers up); **agent-installer distribution added**
-   (`build-agent-installer.ps1` + public `/downloads` page + download API).
-2. **`infra/.env`: fill in Azure O365 placeholders** (Azure client/tenant IDs,
+1. **DONE (session 6-10):** full backend (**89/89**) + frontend (**12/12**) +
+   PowerShell Category B flows executed; WiX UpgradeCode set; `index.html` +
+   frontend Dockerfile added; **full stack deployed via `setup.sh`** (15
+   containers up); **agent-installer distribution added** (`build-agent-installer.ps1`
+   + public `/downloads` page + download API); **one-click setup added and
+   live-tested** (`./install.sh` → setup wizard auto-generates secrets/certs/
+   admin/agent-config → full stack).
+2. **On the real deploy:** run `./install.sh`, enter the real company name, admin
+   email + password, server IP, and the customer's notification mailbox — the
+   wizard writes the full `.env` and the live SMTP send then becomes verifiable.
+3. **`infra/.env`: fill in Azure O365 placeholders** (Azure client/tenant IDs,
    group IDs, Telegraph/Slack) so portal-backend gets its SSO + report-email
    credentials — the token source of the Phase 0 spike.
-3. Validate SSO + O365 email against a **real Azure tenant** (Phase 0 spike).
-4. Build + test the **WiX bundle** on a Windows build machine with the `wix` CLI
+4. Validate SSO + O365 email against a **real Azure tenant** (Phase 0 spike).
+5. Build + test the **WiX bundle** on a Windows build machine with the `wix` CLI
    + the three vendor MSIs; confirm the MSI property names match the actual
    installers before fleet rollout.
-5. Run each self-healing script on a **Windows VM** (dry-run then live) and run
+6. Run each self-healing script on a **Windows VM** (dry-run then live) and run
    `PSScriptAnalyzer` on the whole set to close the last PowerShell gap.

@@ -18,11 +18,18 @@ set -euo pipefail
 CERT_DIR="$(dirname "$0")/certs"
 FORCE="${1:-}"
 
+# Server IP from infra/.env (set by the setup wizard) — added as a SAN on the
+# portal certificate so https://<ip> validates too, not just localhost.
+PORTAL_IP=""
+if [[ -f ".env" ]]; then
+  PORTAL_IP="$(grep -E '^PORTAL_IP=' .env | head -1 | cut -d= -f2 || true)"
+fi
+
 # Every web-facing service per the §7.6 port table. Container-internal
 # hostnames are used since Nginx/each tool serves TLS from inside its
 # own container on the aaditech-internal network.
 SERVICES=(
-  "portal:portal.aaditech.local,localhost"
+  "portal:portal.aaditech.local,localhost${PORTAL_IP:+,$PORTAL_IP}"
   "wazuh-dashboard:wazuh-dashboard,localhost"
   "zabbix:zabbix-web,localhost"
   "glpi:glpi,localhost"
@@ -78,6 +85,9 @@ for entry in "${SERVICES[@]}"; do
 
   IFS=',' read -ra host_array <<< "$hosts"
   mkcert -cert-file "$cert_file" -key-file "$key_file" "${host_array[@]}"
+  # mkcert writes keys 0600, which containers that run as a non-root user
+  # (e.g. Grafana) cannot read. These are LAN-only test certs — relax to 0644.
+  chmod 644 "$cert_file" "$key_file"
   echo "  - $name: issued for [$hosts]"
 done
 

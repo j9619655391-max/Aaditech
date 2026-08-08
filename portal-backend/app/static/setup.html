@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aaditech Platform — Initial Setup</title>
+<style>
+  :root { --brand:#0b5ed7; --bg:#0f172a; --card:#ffffff; --muted:#64748b; --ok:#16a34a; --err:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:var(--bg);
+         color:#0f172a; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:24px; }
+  .card { background:var(--card); border-radius:14px; padding:34px 36px; max-width:560px; width:100%;
+          box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 22px; }
+  label { display:block; font-size:12px; font-weight:600; color:#334155; margin:14px 0 5px; }
+  input, select { width:100%; padding:10px 12px; font-size:14px; border:1px solid #cbd5e1;
+                  border-radius:8px; background:#f8fafc; }
+  input:focus, select:focus { outline:2px solid var(--brand); border-color:transparent; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .hint { font-size:11px; color:var(--muted); margin-top:4px; }
+  button { margin-top:24px; width:100%; padding:12px; font-size:15px; font-weight:600; color:#fff;
+           background:var(--brand); border:0; border-radius:8px; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:not-allowed; }
+  .msg { margin-top:14px; padding:10px 12px; border-radius:8px; font-size:13px; display:none; }
+  .msg.err { display:block; background:#fef2f2; color:var(--err); border:1px solid #fecaca; }
+  .msg.ok { display:block; background:#f0fdf4; color:var(--ok); border:1px solid #bbf7d0; white-space:pre-line; }
+  #smtpHint { background:#f1f5f9; border-radius:8px; padding:8px 10px; font-size:12px; color:#334155; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Aaditech IT Monitoring &amp; Automation Platform</h1>
+    <p class="sub">One-time initial setup. Everything else — tokens, certificates,
+      agent enrollment keys, endpoints — is generated automatically after you
+      submit this form.</p>
+
+    <div id="smtpHint" style="display:none"></div>
+
+    <label for="company">Company name</label>
+    <input id="company" autocomplete="organization" placeholder="Acme Corp" />
+
+    <div class="row">
+      <div>
+        <label for="username">Admin username</label>
+        <input id="username" autocomplete="username" placeholder="admin" />
+      </div>
+      <div>
+        <label for="password">Admin password</label>
+        <input id="password" type="password" autocomplete="new-password" placeholder="8+ characters" />
+      </div>
+    </div>
+
+    <label for="ip">Local server IP</label>
+    <input id="ip" placeholder="10.73.77.58" />
+    <div class="hint">The IP endpoints reach this server on — used for agents,
+      MeshCentral and the portal URL. Detected automatically on most hosts.</div>
+
+    <label for="provider">Notification email provider</label>
+    <select id="provider">
+      <option value="gmail">Gmail</option>
+      <option value="hotmail">Hotmail / Outlook.com</option>
+      <option value="office365">Office 365</option>
+      <option value="hostinger">Hostinger</option>
+      <option value="other">Other / custom SMTP</option>
+    </select>
+    <div class="hint">Only your mailbox username and password are needed — the SMTP
+      host, port and TLS settings for the provider are configured automatically.</div>
+
+    <label for="email">Email address</label>
+    <input id="email" type="email" placeholder="alerts@acme.com" />
+    <label for="emailUser">Email username</label>
+    <input id="emailUser" placeholder="alerts@acme.com" />
+    <label for="emailPass">Email password / app password</label>
+    <input id="emailPass" type="password" autocomplete="off" placeholder="••••••••" />
+    <div class="hint">For Gmail, create an <b>app password</b> (Google account →
+      Security → App passwords). For Office 365 / Hotmail use the mailbox login.</div>
+
+    <button id="go">Generate everything &amp; finish setup</button>
+    <div id="msg" class="msg"></div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  fetch("/api/setup/presets").catch(() => {});
+
+  // Best-effort local IP autodetect.
+  try {
+    const rtc = new RTCPeerConnection({ iceServers: [] });
+    rtc.createDataChannel("");
+    rtc.onicecandidate = (e) => {
+      if (!e.candidate) return;
+      const ip = (e.candidate.candidate || "").match(/(\d+\.\d+\.\d+\.\d+)/);
+      if (ip && !$("ip").value) $("ip").value = ip[1];
+    };
+    rtc.createOffer().then((o) => rtc.setLocalDescription(o)).catch(() => {});
+  } catch (e) {}
+
+  $("provider").addEventListener("change", () => {
+    const p = $("provider").value;
+    const hints = {
+      gmail: "Gmail — smtp.gmail.com:465 (SSL). Use an app password.",
+      hotmail: "Hotmail/Outlook — smtp-mail.outlook.com:587 (STARTTLS).",
+      office365: "Office 365 — smtp.office365.com:587 (STARTTLS).",
+      hostinger: "Hostinger — smtp.hostinger.com:465 (SSL).",
+      other: "Custom SMTP — enter host/port/TLS details in infra/.env after setup if different.",
+    };
+    $("smtpHint").textContent = "Auto-configured: " + (hints[p] || "");
+    $("smtpHint").style.display = "block";
+  });
+  $("provider").dispatchEvent(new Event("change"));
+
+  $("go").addEventListener("click", async () => {
+    const btn = $("go"), msg = $("msg");
+    msg.className = "msg"; msg.style.display = "none";
+    const emailUser = $("emailUser").value || $("email").value;
+
+    const payload = {
+      company_name: $("company").value,
+      admin_username: $("username").value,
+      admin_password: $("password").value,
+      local_ip: $("ip").value,
+      email: {
+        provider: $("provider").value,
+        address: $("email").value,
+        username: emailUser,
+        password: $("emailPass").value,
+      },
+    };
+
+    btn.disabled = true; btn.textContent = "Generating tokens, certificates and enrollment keys…";
+    try {
+      const resp = await fetch("/api/setup/provision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Setup failed");
+      msg.className = "msg ok";
+      msg.textContent =
+        "Deployment provisioned successfully.\n\n" +
+        "• Portal URL: " + data.portal_url + "\n" +
+        "• Admin login: " + data.admin_username + "\n" +
+        "• Email channel: " + data.email_channel + " via " + data.smtp.host + "\n" +
+        "• Agent enrollment key: " + data.enrollment_key + "\n\n" +
+        "The installer is now generating HTTPS certificates and starting the full stack. This page will stop working shortly — sign in at the portal URL when it's ready.";
+    } catch (err) {
+      msg.className = "msg err";
+      msg.textContent = err.message;
+      btn.disabled = false; btn.textContent = "Generate everything & finish setup";
+    }
+  });
+</script>
+</body>
+</html>
