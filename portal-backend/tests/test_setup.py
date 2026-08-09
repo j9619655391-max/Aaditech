@@ -11,7 +11,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import users
+from app import crypto, users
 from app.main import app
 
 client = TestClient(app)
@@ -67,7 +67,10 @@ def test_provision_generates_config_and_admin(setup_env):
     # Existing secrets are preserved
     assert "JWT_SECRET=abc" in env
 
-    agent_cfg = json.loads((setup_env / "agent-config.json").read_text())
+    agent_cfg = crypto.decrypt_json(
+        (setup_env / "agent-config.json").read_text(),
+        [l for l in env.splitlines() if l.startswith("AGENT_CONFIG_KEY=")][0].split("=", 1)[1],
+    )
     assert agent_cfg["managerIp"] == "10.73.77.58"
     assert agent_cfg["zabbixServerIp"] == "10.73.77.58"
     assert agent_cfg["wazuhEnrollKey"] == "preseed-key"
@@ -157,7 +160,7 @@ def test_provision_generates_every_service_secret_when_blank(setup_env):
     body = resp.json()
     assert body["telegram_channel"] is True
     assert body["teams_channel"] is True
-    assert body["secrets_generated"] >= 14  # all SECRET_KEYS were blank
+    assert body["secrets_generated"] >= 15  # all SECRET_KEYS were blank
 
     env = (setup_env / ".env").read_text()
     # Platform secrets present and non-blank

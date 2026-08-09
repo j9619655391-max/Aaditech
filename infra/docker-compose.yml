@@ -151,9 +151,20 @@ services:
       # (POST /api/agent-installer/build → GitHub Actions) or by
       # infra/fetch-agent-build.sh; served read-only to the /downloads page.
       - AADITECH_INSTALLER_DIR=/installer
+      # One-click agent package (§7.2): encrypted agent-config.json lives in
+      # infra/ (written by the wizard); the install-agent.bat template and the
+      # mkcert root CA are served to endpoints over HTTPS so the package can
+      # trust the portal cert without shipping secrets in plaintext.
+      - INFRA_DIR=/infra
+      - AGENT_CONFIG_KEY=${AGENT_CONFIG_KEY}
+      - AADITECH_AGENT_SCRIPTS_DIR=/agent-scripts
+      - AADITECH_CERTS_DIR=/certs
     volumes:
       - portal-data:/data
       - ./installers:/installer
+      - ./:/infra:ro
+      - ../agent-installer:/agent-scripts:ro
+      - ./certs:/certs:ro
     networks:
       - aaditech-edge
       - aaditech-internal

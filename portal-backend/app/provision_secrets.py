@@ -41,6 +41,8 @@ SECRET_KEYS: list[str] = [
     "JWT_SECRET",
     # Agent enrollment
     "WAZUH_ENROLL_KEY",
+    # Agent config at-rest encryption (Fernet key seed for infra/agent-config.json)
+    "AGENT_CONFIG_KEY",
 ]
 
 # Fixed (non-random) values that must exist in .env so the compose stack and

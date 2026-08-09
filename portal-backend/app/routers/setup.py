@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from app import provision_secrets, users
+from app import crypto, provision_secrets, users
 from app.config import settings
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -255,6 +256,10 @@ async def provision(payload: dict):
 
     # Agent installer config — same values the exe needs at install time
     # (the .exe itself is portable; this is the per-deployment answer file).
+    # Encrypted AT REST with AGENT_CONFIG_KEY — the plaintext only exists in
+    # the process and over HTTPS via the /api/agent-installer endpoints
+    # (app/crypto.py). setup.py runs in the setup service; downloads.py runs in
+    # the main portal-backend, both read the same infra/.env key.
     agent_config = {
         "managerIp": data["local_ip"],
         "wazuhAgentVersion": env.get("WAZUH_AGENT_VERSION", "4.14.5"),
@@ -264,7 +269,11 @@ async def provision(payload: dict):
         "meshCentralUrl": f"https://{data['local_ip']}:4433",
         "meshId": env.get("MESHCENTRAL_MESH_ID", ""),
     }
-    (_infra_dir() / "agent-config.json").write_text(json.dumps(agent_config, indent=2))
+    _infra_agent_config = _infra_dir() / "agent-config.json"
+    _infra_agent_config.write_text(
+        crypto.encrypt_json(agent_config, env.get("AGENT_CONFIG_KEY") or env_updates.get("AGENT_CONFIG_KEY", ""))
+    )
+    os.chmod(_infra_agent_config, 0o600)
 
     # Bootstrap admin account (local login).
     try:

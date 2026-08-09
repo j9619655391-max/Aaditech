@@ -10,12 +10,18 @@ Deliberately PUBLIC (no auth dependency):
 - Fleet staff / GPO / Intune must be able to grab the package without a portal
   account.
 
+Admin-guarded endpoints (secrets / write actions):
+- The one-click package (install-agent.bat + encrypted-config) requires a
+  portal session so credentials never leave the portal over an open URL.
+
 Endpoints:
-  GET  /api/agent-installer/info      -> JSON metadata (available, size, filename)
-  GET  /api/agent-installer/download  -> the actual .exe, as an attachment
-  POST /api/agent-installer/build     -> (CLEANUP_APPROVER) trigger a GitHub
-        Actions build of the .exe and pull it into installer_dir. Requires
-        GITHUB_BUILD_PAT + GITHUB_REPO configured in infra/.env.
+  GET  /api/agent-installer/info          -> JSON metadata (available, size, filename)
+  GET  /api/agent-installer/download      -> the actual .exe, as an attachment
+  GET  /api/agent-installer/config        -> (ADMIN) decrypted agent-config.json
+  GET  /api/agent-installer/root-ca       -> mkcert root CA (for endpoint trust)
+  POST /api/agent-installer/token         -> (ADMIN) mint a per-endpoint service token
+  POST /api/agent-installer/upload        -> (ADMIN) accept a locally-built .exe
+  POST /api/agent-installer/build         -> (ADMIN) trigger a GitHub Actions build
 
 The executable is expected under `settings.installer_dir` (an env-mounted path;
 see infra/). If it hasn't been built yet, both GET endpoints report
@@ -28,9 +34,11 @@ import os
 import zipfile
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from app import crypto
+from app.auth import create_service_token
 from app.config import settings
 from app.roles import require_cleanup_approver
 
@@ -38,6 +46,8 @@ router = APIRouter(prefix="/agent-installer", tags=["agent-installer"])
 
 INSTALLER_FILENAME = "Aaditech-Agent-Setup.exe"
 WORKFLOW = "build-agent-installer.yml"
+ROOT_CA_FILENAME = "rootCA.pem"
+BAT_FILENAME = "install-agent.bat"
 
 GITHUB_API = "https://api.github.com"
 
@@ -50,6 +60,39 @@ def installer_path() -> str:
 def _installed() -> bool:
     path = installer_path()
     return bool(path) and os.path.isfile(path)
+
+
+def _agent_config_path() -> str:
+    return os.path.join(settings.infra_dir, "agent-config.json")
+
+
+def _read_agent_config() -> dict:
+    """Decrypt the at-rest agent config (written encrypted by the wizard)."""
+    if not settings.infra_dir or not settings.agent_config_key:
+        raise HTTPException(status_code=503, detail="agent_config_unavailable")
+    try:
+        token = open(_agent_config_path(), encoding="utf-8").read()
+    except OSError:
+        raise HTTPException(status_code=404, detail="agent_config_not_found")
+    try:
+        return crypto.decrypt_json(token, settings.agent_config_key)
+    except ValueError:
+        raise HTTPException(status_code=500, detail="agent_config_corrupt")
+
+
+def _root_ca_path() -> str:
+    return os.path.join(settings.certs_dir, ROOT_CA_FILENAME)
+
+
+def _bat_template() -> bytes:
+    """install-agent.bat lives in the agent-installer dir (read-only mount)."""
+    if not settings.agent_scripts_dir:
+        raise HTTPException(status_code=503, detail="agent_scripts_dir_not_mounted")
+    path = os.path.join(settings.agent_scripts_dir, BAT_FILENAME)
+    try:
+        return open(path, "rb").read()
+    except OSError:
+        raise HTTPException(status_code=404, detail="install_agent_bat_not_found")
 
 
 @router.get("")
@@ -80,6 +123,62 @@ async def download_installer():
         media_type="application/octet-stream",
         filename=INSTALLER_FILENAME,
     )
+
+
+# --- One-click package + config (admin-guarded; carries live credentials) ---
+
+
+@router.get("/config")
+async def agent_config(user: dict = Depends(require_cleanup_approver)):
+    """Decrypted per-deployment agent answer file. The plaintext is only
+    produced on demand, over HTTPS, to an authenticated approver — it is never
+    written to disk unencrypted (see app/crypto.py)."""
+    return _read_agent_config()
+
+
+@router.get("/root-ca")
+async def root_ca():
+    """Serve the mkcert root CA so an endpoint can trust the portal's HTTPS
+    cert before installing the agent (the one-click .bat fetches this)."""
+    if not settings.certs_dir or not os.path.isfile(_root_ca_path()):
+        return JSONResponse({"error": "root_ca_unavailable"}, status_code=404)
+    return FileResponse(_root_ca_path(), media_type="application/x-pem-file", filename=ROOT_CA_FILENAME)
+
+
+@router.post("/token")
+async def mint_agent_token(
+    payload: dict, user: dict = Depends(require_cleanup_approver)
+):
+    """Mint a per-endpoint service token for the command poller
+    (self-healing/agent-command-poller.ps1). Long-lived by design — a machine
+    credential, not a session. Returned exactly once; the installer stores it
+    DPAPI-encrypted on the endpoint."""
+    endpoint_id = str(payload.get("endpoint_id") or "").strip()
+    if not endpoint_id:
+        raise HTTPException(status_code=400, detail="endpoint_id is required")
+    token = create_service_token(endpoint_id, ["viewer"])
+    return {"endpoint_id": endpoint_id, "token": token, "expiry_days": 365}
+
+
+@router.post("/upload")
+async def upload_installer(file: UploadFile, user: dict = Depends(require_cleanup_approver)):
+    """Accept a .exe built locally on a Windows admin machine (the "Create
+    Agent" tab's local-build path) and publish it to installer_dir."""
+    if file.filename != INSTALLER_FILENAME:
+        raise HTTPException(status_code=400, detail=f"filename must be {INSTALLER_FILENAME}")
+    if not settings.installer_dir:
+        raise HTTPException(status_code=503, detail="installer_dir_not_mounted")
+
+    os.makedirs(settings.installer_dir, exist_ok=True)
+    dest = installer_path()
+    with open(dest, "wb") as out:
+        out.write(await file.read())
+    return {
+        "uploaded": True,
+        "filename": INSTALLER_FILENAME,
+        "size_bytes": os.path.getsize(dest),
+        "message": "Locally-built installer published to the portal.",
+    }
 
 
 def _gh_headers() -> dict:

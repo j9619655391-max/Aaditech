@@ -96,6 +96,15 @@ cp "$CERT_DIR/portal.pem" "$CERT_DIR/portal.crt" 2>/dev/null || true
 cp "$CERT_DIR/portal-key.pem" "$CERT_DIR/portal.key" 2>/dev/null || true
 cp "$CERT_DIR/grafana.pem" "$CERT_DIR/grafana.pem" 2>/dev/null || true
 
+# Export the mkcert root CA alongside the per-service certs so the portal can
+# serve it to endpoints — the one-click agent package downloads this over HTTPS
+# and installs it into the Windows Root store to trust the portal cert.
+CAROOT_DIR="$(mkcert -CAROOT 2>/dev/null || true)"
+if [[ -n "$CAROOT_DIR" && -f "$CAROOT_DIR/rootCA.pem" ]]; then
+  cp "$CAROOT_DIR/rootCA.pem" "$CERT_DIR/rootCA.pem"
+  echo "  - rootCA.pem exported to $CERT_DIR for agent endpoint trust"
+fi
+
 echo ""
 echo "Done. Certificates written to: $CERT_DIR"
 echo ""

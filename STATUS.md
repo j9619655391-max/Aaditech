@@ -1,11 +1,62 @@
 # Aaditech Platform — Build Status
 
 Spec version implemented against: **v1.4** (Aaditech_IT-Monitoring-Automation-Platform-Spec_v1_4.docx)
-Last updated: session 11 (multi-channel wizard, all-secrets-at-setup, preflight, GitHub-built agent).
+Last updated: session 12 (one-click .bat endpoint installer, OS-aware "Create Agent" tab, at-rest config encryption).
 
 Legend: ✅ Done & verified (executed) · 🟡 Code complete, not executable-without-a-live-dependency · ⬜ Not started · ⚠️ Flagged issue/gap
 
-## Session 11: wizard channels, blank-before-setup secrets, preflight, GitHub-built agent
+## Session 12: one-click `.bat`, "Create Agent" tab, secret encryption
+
+Answers Aziz's question "can the agent side be a `.bat` that does all the
+manual work?" — **yes, and it's the right call**. Simpler than a custom Burn
+BA: a single `install-agent.bat` double-clicked next to `AgentConfig.json`
+elevates, installs the portal CA, downloads the `.exe`, runs it silently with
+the config values, and writes the poller answer file. Secrets are encrypted
+at rest and only ever travel over HTTPS to an authenticated approver.
+
+### ✅ `install-agent.bat` — one-click endpoint installer (NEW)
+
+- Self-elevates (UAC), reads `AgentConfig.json` beside it, derives the portal
+  base from the mesh URL, downloads the portal root CA
+  (`/api/agent-installer/root-ca`) and adds it to the Windows Root store,
+  downloads `Aaditech-Agent-Setup.exe` if absent, runs it silently with
+  `ManagerIp/ZabbixServerIp/MeshCentralUrl/WazuhEnrollKey`, and writes
+  `%ProgramData%\Aaditech\AADITECH_ENV.txt` for the command poller. No
+  secrets in the `.bat` — every value comes from the per-deployment config.
+
+### ✅ "Create Agent" tab (portal frontend, OS-aware)
+
+- `CreateAgent.jsx` (NEW, protected `/create-agent` route + nav item):
+  detects the browser OS — **Windows** → build the `.exe` locally
+  (`build-agent-installer.ps1`) and upload it via `POST /api/agent-installer/upload`;
+  **Linux/Ubuntu** → build via GitHub Actions and pull. Plus one-click
+  package downloads (`.exe`, `AgentConfig.json`, root CA) and the poller
+  token minting UI.
+
+### ✅ Secret encryption (no plaintext at rest)
+
+- `app/crypto.py` (NEW): Fernet encrypt/decrypt keyed off `AGENT_CONFIG_KEY`
+  (new wizard secret). `infra/agent-config.json` is now written **encrypted**;
+  `GET /api/agent-installer/config` (cleanup-approver only) returns the
+  decrypted answer file over HTTPS. Plaintext only ever exists in-process /
+  in-transit.
+- New admin endpoints: `GET /config`, `GET /root-ca`, `POST /token`
+  (per-endpoint long-lived service JWT for `agent-command-poller.ps1`),
+  `POST /upload` (publish a locally-built `.exe`).
+- `infra/docker-compose.yml`: portal-backend gains `INFRA_DIR`,
+  `AGENT_CONFIG_KEY`, `AADITECH_AGENT_SCRIPTS_DIR`, `AADITECH_CERTS_DIR`
+  mounts; `setup-certs.sh` exports `rootCA.pem` into `infra/certs/`.
+
+### ✅ Tests / build
+
+- Backend **115/115** (was 105; +5 downloads endpoints, +1 crypto-covered
+  setup). Frontend **12/12** + `vite build` green.
+
+### ⚠️ Still open (from session 11, unchanged)
+
+- Real SMTP/Graph sends + live GitHub build-and-pull still need live creds.
+- `zabbix-server` pre-existing DB-schema mismatch unchanged.
+- Wazuh enrollment: manager `authd` password not yet wired to the enroll key.
 
 Answers: "can we add MS Teams + Telegram to setup?" — **yes, all three
 channels now**, plus a host dependency check and auto-building the agent `.exe`
@@ -435,14 +486,15 @@ Everything else below was actually run and is marked ✅.
 | `app/routers/tickets.py` | ✅ executed | RBAC Support Eng+. |
 | `app/routers/remote.py` | 🟡 | session/status/end; RBAC Support Eng+. |
 | `app/routers/dashboards.py` | ✅ | Grafana embed signing + refresh + retry. |
-| `app/routers/downloads.py` | ✅ executed 8/8 | public agent-installer info + download; 404 when not published; **NEW (session 11)** admin `POST /build` → GitHub Actions build + pull `.exe`. |
+| `app/routers/downloads.py` | ✅ executed 13/13 | public agent-installer info + download; admin `POST /build` → GitHub Actions build + pull `.exe`; **NEW (session 12)** `GET /config` (decrypted), `GET /root-ca`, `POST /token`, `POST /upload`. |
 | `app/routers/cleanup.py` | ✅ executed | scan-submit/list/approve/restore/purge + agent command poll/ack/complete. |
 | `app/routers/auth_sso.py` | ✅ offline / 🟡 live | Real login/callback; live handshake needs a tenant. |
 | `app/routers/auth_local.py` | ✅ executed 3/3 (NEW session 10) | Local login for the wizard admin; same JWT shape as SSO. |
-| `app/routers/setup.py` | ✅ executed 15/15 (session 10/11) | `/api/setup/status` (+ `dependencies` from preflight) + `/provision` — generates ALL secrets + channels (email/Telegram/Teams) + GitHub PAT, admin, agent-config, certs. |
-| `app/provision_secrets.py` | ✅ executed (NEW session 11) | Single source of truth for the 14 secret keys + the blank `.env` template. |
+| `app/routers/setup.py` | ✅ executed 15/15 (session 10/11) | `/api/setup/status` (+ `dependencies` from preflight) + `/provision` — generates ALL secrets + channels (email/Telegram/Teams) + GitHub PAT, admin, agent-config, certs. agent-config now encrypted at rest (session 12). |
+| `app/provision_secrets.py` | ✅ executed (NEW session 11) | Single source of truth for the 15 secret keys (+`AGENT_CONFIG_KEY`, session 12) + the blank `.env` template. |
+| `app/crypto.py` | ✅ executed (NEW session 12) | Fernet encrypt/decrypt of `infra/agent-config.json` at rest. |
 | `app/users.py` | ✅ executed 4/4 (NEW session 10) | SQLite users + bcrypt `create_user` / `verify_credentials`. |
-| `tests/` (19 files) | ✅ 105/105 | **All executed and green via pytest (session 11: +test_teams_alert, +setup/downloads additions).** |
+| `tests/` (19 files) | ✅ 115/115 | **All executed and green via pytest (session 12: +downloads config/root-ca/token/upload).** |
 
 ### Self-Healing (`self-healing/`)
 | Item | Status | Notes |
@@ -463,13 +515,14 @@ Everything else below was actually run and is marked ✅.
 | `Dockerfile` + `.dockerignore` | ✅ (NEW session 6) | node build → nginx serve. |
 | `src/api/client.js` | ✅ | Centralized client, bearer interceptor, 401→redirect; all 6 API namespaces. |
 | Routing + layout | ✅ | `App.jsx` AppContent+App split; `Layout.jsx`. |
-| Pages | ✅ | Login, Overview, Alerts, Metrics, Tickets, Cleanup, RemoteAccess, DownloadAgent (public, session 8; +Build from GitHub Actions button, session 11). |
+| Pages | ✅ | Login, Overview, Alerts, Metrics, Tickets, Cleanup, RemoteAccess, DownloadAgent (public, session 8; +Build from GitHub Actions button, session 11), **CreateAgent (session 12, OS-aware)**. |
 | Vitest suite | ✅ 12/12 | `App.test.jsx`, `Cleanup.test.jsx`, `client.test.js` — **executed.** |
 
 ### Agent Installer (`agent-installer/`)
 | Item | Status | Notes |
 |---|---|---|
 | `one-click-install.ps1` | 🟡 parses | Downloads Wazuh/Zabbix/Mesh; needs a Windows endpoint to run. |
+| `install-agent.bat` | ✅ (NEW session 12) | **One-click endpoint installer** — elevate, portal CA, `.exe` download, silent install from `AgentConfig.json`, poller answer file. No secrets in the `.bat`. |
 | `build-agent-installer.ps1` | ✅ (NEW) parses, lint 0 errors | **One-click Windows build**: installs WiX, downloads vendor agents, compiles `Aaditech-Agent-Setup.exe`. Server values not baked in (`bal:Overridable`). |
 | `AgentConfig.sample.json` | ✅ | The one manual config file. |
 | `wix/AaditechAgentBundle.wxs` | 🟡 | WiX v4 Burn bundle; **real UpgradeCode now set** (session 6); compile needs a Windows `wix` CLI (now scriptable via `build-agent-installer.ps1`). |
@@ -501,21 +554,21 @@ Everything else below was actually run and is marked ✅.
 ## Test execution summary (cumulative, definitive)
 
 ```
-ALL backend tests executed via pytest:  105/105 PASS across 19 files
+ALL backend tests executed via pytest:  115/115 PASS across 19 files
 
 PASS: test_agent_commands.py       8/8   (+2 QUARANTINE tests)
 PASS: test_auth.py                 3/3
 PASS: test_auth_local.py           3/3  (session 10, NEW)
 PASS: test_cleanup_router.py       4    (RBAC approve deny, lifecycle)
 PASS: test_cleanup_store.py        9/9
-PASS: test_downloads.py            8/8  (session 11: +4 GitHub build flow tests)
+PASS: test_downloads.py            13/13 (session 12: +config/root-ca/token/upload)
 PASS: test_glpi_client.py          4/4
 PASS: test_main.py                6
 PASS: test_meshcentral_client.py   3/3
 PASS: test_persistence.py          3/3  (session 5, new)
 PASS: test_pilot_ring.py           9/9
 PASS: test_provision_secrets.py 3/3  (session 11, NEW)
-PASS: test_setup.py               15/15 (session 11: +telegram/teams/deps/secret-gen)
+PASS: test_setup.py               15/15 (session 11; +encrypted agent-config session 12)
 PASS: test_sso_email.py            6/6  (session 5, new)
 PASS: test_teams_alert.py          4/4  (session 11, NEW)
 PASS: test_users.py                4/4  (session 10, NEW)
@@ -534,7 +587,7 @@ PowerShell functional (pwsh 7.4.6):
 
 ## Recommended next steps (in order)
 
-1. **DONE (session 6-11):** full backend (**105/105**) + frontend (**12/12**) +
+1. **DONE (session 6-12):** full backend (**115/115**) + frontend (**12/12**) +
    PowerShell Category B flows executed; WiX UpgradeCode set; `index.html` +
    frontend Dockerfile added; **full stack deployed via `setup.sh`** (15
    containers up); **agent-installer distribution added** (`build-agent-installer.ps1`
@@ -542,7 +595,9 @@ PowerShell functional (pwsh 7.4.6):
    (`./install.sh` → preflight → blank `.env` → wizard auto-generates all
    secrets/certs/admin/agent-config → full stack); **multi-channel wizard**
    (email + Telegram + MS Teams, O365 app-password guidance) + **GitHub-built
-   agent** (`POST /api/agent-installer/build`, `fetch-agent-build.sh`).
+   agent** (`POST /api/agent-installer/build`, `fetch-agent-build.sh`); **one-click
+   `.bat` endpoint installer + OS-aware Create Agent tab + at-rest config
+   encryption** (session 12).
 2. **On the real deploy:** run `./install.sh`, enter the real company name, admin
    email + password, server IP, notification channels (email/Telegram/Teams) and
    the GitHub PAT — the wizard writes the full `.env` and the live SMTP send then

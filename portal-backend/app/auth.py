@@ -27,6 +27,15 @@ def create_access_token(subject: str, roles: list[str]) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+def create_service_token(subject: str, roles: list[str], expiry_days: int = 365) -> str:
+    """A long-lived machine token (agent pollers, cron jobs). Scoped to the
+    same JWT role model as user sessions, so existing require_* dependencies
+    work unchanged — the difference is only the expiry."""
+    expire = datetime.now(timezone.utc) + timedelta(days=expiry_days)
+    payload = {"sub": subject, "roles": roles, "exp": expire, "service": True}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
 def decode_access_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])

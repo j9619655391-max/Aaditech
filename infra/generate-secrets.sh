@@ -56,6 +56,11 @@ JWT_SECRET=$(rand)
 # One-click setup (filled by the setup wizard; only the random enrollment key
 # is pre-generated here so every deploy has a unique agent enroll key):
 WAZUH_ENROLL_KEY=$(rand)
+
+# Agent config at-rest encryption key (Fernet key seed) — written encrypted
+# by the wizard to infra/agent-config.json (app/crypto.py).
+AGENT_CONFIG_KEY=$(rand)
+
 COMPANY_NAME=
 PORTAL_IP=
 

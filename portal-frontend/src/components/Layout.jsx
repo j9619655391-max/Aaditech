@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: "/tickets", label: "Tickets" },
   { to: "/cleanup", label: "Cleanup Approval" },
   { to: "/remote", label: "Remote Access" },
+  { to: "/create-agent", label: "Create Agent" },
 ];
 
 export default function Layout({ children }) {

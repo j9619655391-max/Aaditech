@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import DownloadAgent from "./pages/DownloadAgent";
+import CreateAgent from "./pages/CreateAgent";
 import Overview from "./pages/Overview";
 import Alerts from "./pages/Alerts";
 import Metrics from "./pages/Metrics";
@@ -34,6 +35,7 @@ export function AppContent() {
                 <Route path="/tickets" element={<Tickets />} />
                 <Route path="/cleanup" element={<Cleanup />} />
                 <Route path="/remote" element={<RemoteAccess />} />
+                <Route path="/create-agent" element={<CreateAgent />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

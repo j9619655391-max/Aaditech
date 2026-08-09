@@ -26,6 +26,16 @@ the MeshCentral agent from your own portal's MeshCentral instance) and
 installs them silently. Nothing to download by hand, no multi-script
 sequence.
 
+**Even simpler — `install-agent.bat`** (added session 12, for standalone
+systems): a single `.bat` you double-click on the endpoint next to
+`AgentConfig.json`. It self-elevates, installs the portal's root CA (fetched
+from `/api/agent-installer/root-ca` over HTTPS), downloads
+`Aaditech-Agent-Setup.exe` from the portal if it isn't beside the `.bat`,
+runs the silent install injecting `ManagerIp`/`ZabbixServerIp`/
+`MeshCentralUrl`/`WazuhEnrollKey` from the config, and writes
+`%ProgramData%\Aaditech\AADITECH_ENV.txt` for the command poller. No typing,
+no secrets in the `.bat`.
+
 **Why `AgentConfig.json` can't be filled in for you:** the manager IP,
 enrollment key, and mesh ID are specific to *your* deployment — nobody
 else can know them, including this script. Same as any deploy tool:

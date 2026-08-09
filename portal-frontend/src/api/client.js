@@ -73,7 +73,17 @@ export const cleanupApi = {
 export const agentInstallerApi = {
   info: () => client.get("/agent-installer").then((r) => r.data),
   build: () => client.post("/agent-installer/build").then((r) => r.data),
+  config: () => client.get("/agent-installer/config").then((r) => r.data),
+  mintToken: (endpointId) =>
+    client.post("/agent-installer/token", { endpoint_id: endpointId }).then((r) => r.data),
+  upload: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return client.post("/agent-installer/upload", form).then((r) => r.data);
+  },
   downloadUrl: () => "/api/agent-installer/download",
+  configUrl: () => "/api/agent-installer/config",
+  rootCaUrl: () => "/api/agent-installer/root-ca",
 };
 
 export default client;
