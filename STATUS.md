@@ -1,9 +1,87 @@
 # Aaditech Platform — Build Status
 
 Spec version implemented against: **v1.4** (Aaditech_IT-Monitoring-Automation-Platform-Spec_v1_4.docx)
-Last updated: session 10 (one-click setup wizard, live-tested end to end).
+Last updated: session 11 (multi-channel wizard, all-secrets-at-setup, preflight, GitHub-built agent).
 
 Legend: ✅ Done & verified (executed) · 🟡 Code complete, not executable-without-a-live-dependency · ⬜ Not started · ⚠️ Flagged issue/gap
+
+## Session 11: wizard channels, blank-before-setup secrets, preflight, GitHub-built agent
+
+Answers: "can we add MS Teams + Telegram to setup?" — **yes, all three
+channels now**, plus a host dependency check and auto-building the agent `.exe`
+via a GitHub PAT. Live-tested end to end in a real Docker container.
+
+### ✅ Notification channels — email + Telegram + MS Teams (wizard)
+
+- `alerting.py`: new `_send_teams` (posts a classic MessageCard, falls back to
+  the Workflow/adaptive-card payload for modern connectors); `send_alert` now
+  fans out to **Telegram AND Slack AND MS Teams**, raising `AlertDeliveryError`
+  only if ALL three fail. New `teams_webhook_url` config setting.
+- Wizard (`setup.html`) has a section per channel; each is optional and
+  validated (Telegram needs both bot token + chat ID; Teams webhook must be
+  https). Email keeps the provider presets.
+- **Office 365 / MFA**: wizard shows an inline note for `office365`/`hotmail` —
+  Microsoft disabled basic SMTP auth, so it explains the **app password** path
+  vs the **Graph OAuth2** path (see `docs/AZURE_SSO_EMAIL.md`).
+
+### ✅ All secrets generated at setup time (nothing before)
+
+- `app/provision_secrets.py` (NEW) — single source of truth for the 14 secret
+  keys + the `blank_env()` template. `install.sh` writes a **blank** `infra/.env`
+  (only `SMTP_PORT=587` default) and does NOT pre-generate secrets.
+- `setup.py` provision generates **every** platform/DB secret in one shot on
+  submit (Wazuh, Zabbix, GLPI, OCS, MeshCentral, Grafana, JWT, enroll key),
+  preserves any pre-seeded values, and writes channels + GitHub PAT.
+  Verified live: blank template → provision → 28 keys populated.
+
+### ✅ Host preflight dependency check
+
+- `infra/preflight.sh` (NEW): checks docker, compose v2, openssl, curl,
+  python3 (critical), mkcert, all 11 host ports, ≥20 GB disk, internet.
+  Prints a report AND writes `infra/.preflight.json`; exits 1 on any critical
+  fail. `install.sh` runs it first and aborts on FAIL.
+- Wizard renders the same checklist (via `GET /api/setup/status` →
+  `dependencies`), so "what's installed / what's pending" is visible in the UI.
+
+### ✅ Agent `.exe` via GitHub PAT + cross-platform
+
+- `POST /api/agent-installer/build` (NEW, `cleanup_approver`): triggers
+  `build-agent-installer.yml` via `GITHUB_BUILD_PAT`/`GITHUB_REPO`, waits for
+  the run, downloads the artifact and extracts `Aaditech-Agent-Setup.exe` into
+  `infra/installers/` (now a host bind mount instead of a `:ro` named volume).
+- Frontend: **Build .exe from GitHub Actions** button on the public
+  `/downloads` page (shown when logged in).
+- `infra/fetch-agent-build.sh` (NEW): same flow from the **Ubuntu host** with
+  curl + python3 (no Windows needed). Windows path unchanged
+  (`build-agent-installer.ps1`).
+- **Fixed a session-10 bug**: portal-backend never received the `SMTP_*`,
+  `COMPANY_NAME`, `PORTAL_IP`, `WAZUH_ENROLL_KEY` env vars (only the setup
+  service did) — so SMTP/identity were silently empty after provisioning.
+  Added them to `docker-compose.yml`.
+
+### ✅ Azure SSO + O365 email testing dependencies
+
+- `docs/AZURE_SSO_EMAIL.md` (NEW) — full checklist: app-password vs Graph for
+  O365 email, and the exact Azure values (`AZURE_CLIENT_ID/SECRET/TENANT_ID`,
+  admin group IDs, redirect URI incl. the `AADSTS50011` trap, `Mail.Send`
+  permission), mapped to `infra/.env`.
+
+### ✅ Live end-to-end (real container, blank template)
+
+- Blank `.env` → bootstrap setup → wizard up → provision with email + Telegram
+  + Teams + GitHub PAT → 28 secrets written, `agent-config.json` correct,
+  `smokeadmin` login verified → cleaned up (admin deleted, `.env` restored,
+  stack down).
+- **Backend 105/105** (was 89; +5 setup, +4 build-endpoint, +4 Teams-alert,
+  +3 secrets tests). Frontend **12/12** + build green. Bash scripts syntax-checked.
+
+### ⚠️ Still open
+
+- Real SMTP **send** (gmail/hotmail/office365/hostinger) & real Graph `/sendMail`
+  still need a live mailbox/tenant — the wizard now collects the right inputs.
+- GitHub PAT must have `actions: read+write`; a full live build-and-pull wasn't
+  run (endpoint + script are unit-tested with a stubbed API).
+- `zabbix-server` pre-existing DB-schema mismatch unchanged (see session 10).
 
 ## Session 10: one-click setup — wizard generates everything, no manual config
 
@@ -328,7 +406,9 @@ Everything else below was actually run and is marked ✅.
 | `generate-secrets.sh` | ✅ | Produces `.env` with all v1.4 secrets + encrypted placeholder email/Azure stubs. |
 | `setup-certs.sh` | ✅ executed | mkcert + per-service certs; non-root safe; chmod 644 + IP SAN re-issue (session 10). |
 | `setup.sh` | ✅ executed | Preflight → secrets → certs → `compose up -d` → wait on `/api/health`. |
-| `install.sh` | ✅ executed (NEW session 10) | **One-click:** wizard at :8080 → auto-provision → full stack; safe re-run via `.provisioned`. |
+| `install.sh` | ✅ executed (session 10) | **One-click:** preflight → blank `.env` → wizard at :8080 → auto-provision → full stack; safe re-run via `.provisioned`. |
+| `preflight.sh` | ✅ executed (NEW session 11) | Host dependency check (docker/compose/openssl/curl/python3/mkcert/ports/disk/internet) → report + `.preflight.json`, abort on critical FAIL. |
+| `fetch-agent-build.sh` | ✅ code (NEW session 11) | Trigger GitHub Actions + pull the `.exe` from Ubuntu (cross-platform alternative to the Windows build script). |
 | `certs/` | ✅ | Pre-generated mkcert-style certs committed. |
 
 ### Portal Backend (`portal-backend/`)
@@ -347,7 +427,7 @@ Everything else below was actually run and is marked ✅.
 | `app/integrations/glpi_client.py` | ✅ executed 4/4 | initSession + Ticket CRUD. |
 | `app/integrations/meshcentral_client.py` | ✅ executed 3/3 | start/status/end session. |
 | `app/ms_oauth.py` | ✅ executed 1/1 | OAuth2 + Graph helpers (via test_sso_email). |
-| `app/integrations/alerting.py` | ✅ | Telegram+Slack primary; email via ms_oauth. |
+| `app/integrations/alerting.py` | ✅ executed | Telegram+Slack+MS Teams primary; email via SMTP/ms_oauth (session 11: Teams + SMTP presets live). |
 | `app/integrations/version_drift.py` | ✅ executed 5/5 | Per-agent version drift. |
 | `app/integrations/pilot_ring.py` | ✅ executed 9/9 | Pilot/fleet ring + bake period. |
 | `app/routers/alerts.py` | ✅ executed | RBAC Viewer+. |
@@ -355,13 +435,14 @@ Everything else below was actually run and is marked ✅.
 | `app/routers/tickets.py` | ✅ executed | RBAC Support Eng+. |
 | `app/routers/remote.py` | 🟡 | session/status/end; RBAC Support Eng+. |
 | `app/routers/dashboards.py` | ✅ | Grafana embed signing + refresh + retry. |
-| `app/routers/downloads.py` | ✅ executed 4/4 | **NEW (session 8)** public agent-installer info + download; 404 when not published. |
+| `app/routers/downloads.py` | ✅ executed 8/8 | public agent-installer info + download; 404 when not published; **NEW (session 11)** admin `POST /build` → GitHub Actions build + pull `.exe`. |
 | `app/routers/cleanup.py` | ✅ executed | scan-submit/list/approve/restore/purge + agent command poll/ack/complete. |
 | `app/routers/auth_sso.py` | ✅ offline / 🟡 live | Real login/callback; live handshake needs a tenant. |
 | `app/routers/auth_local.py` | ✅ executed 3/3 (NEW session 10) | Local login for the wizard admin; same JWT shape as SSO. |
-| `app/routers/setup.py` | ✅ executed 10/10 (NEW session 10) | `/api/setup/status` + `/api/setup/submit` — full auto-provision (env, admin, agent-config, certs). |
+| `app/routers/setup.py` | ✅ executed 15/15 (session 10/11) | `/api/setup/status` (+ `dependencies` from preflight) + `/provision` — generates ALL secrets + channels (email/Telegram/Teams) + GitHub PAT, admin, agent-config, certs. |
+| `app/provision_secrets.py` | ✅ executed (NEW session 11) | Single source of truth for the 14 secret keys + the blank `.env` template. |
 | `app/users.py` | ✅ executed 4/4 (NEW session 10) | SQLite users + bcrypt `create_user` / `verify_credentials`. |
-| `tests/` (16 files) | ✅ 89/89 | **All executed and green via pytest (session 10: +test_users, +test_auth_local, +test_setup).** |
+| `tests/` (19 files) | ✅ 105/105 | **All executed and green via pytest (session 11: +test_teams_alert, +setup/downloads additions).** |
 
 ### Self-Healing (`self-healing/`)
 | Item | Status | Notes |
@@ -382,7 +463,7 @@ Everything else below was actually run and is marked ✅.
 | `Dockerfile` + `.dockerignore` | ✅ (NEW session 6) | node build → nginx serve. |
 | `src/api/client.js` | ✅ | Centralized client, bearer interceptor, 401→redirect; all 6 API namespaces. |
 | Routing + layout | ✅ | `App.jsx` AppContent+App split; `Layout.jsx`. |
-| Pages | ✅ | Login, Overview, Alerts, Metrics, Tickets, Cleanup, RemoteAccess, DownloadAgent (public, session 8). |
+| Pages | ✅ | Login, Overview, Alerts, Metrics, Tickets, Cleanup, RemoteAccess, DownloadAgent (public, session 8; +Build from GitHub Actions button, session 11). |
 | Vitest suite | ✅ 12/12 | `App.test.jsx`, `Cleanup.test.jsx`, `client.test.js` — **executed.** |
 
 ### Agent Installer (`agent-installer/`)
@@ -401,6 +482,7 @@ Everything else below was actually run and is marked ✅.
 | `README.md` | ✅ |
 | `docs/ARCHITECTURE.md` | ✅ |
 | `docs/DEPLOYMENT.md` | ✅ |
+| `docs/AZURE_SSO_EMAIL.md` | ✅ (NEW session 11) — Azure SSO + O365 email testing checklist |
 | `STATUS.md` (this file) | ✅ |
 
 ## Open items / not-started (consolidated)
@@ -419,21 +501,23 @@ Everything else below was actually run and is marked ✅.
 ## Test execution summary (cumulative, definitive)
 
 ```
-ALL backend tests executed via pytest:  89/89 PASS across 16 files
+ALL backend tests executed via pytest:  105/105 PASS across 19 files
 
 PASS: test_agent_commands.py       8/8   (+2 QUARANTINE tests)
 PASS: test_auth.py                 3/3
 PASS: test_auth_local.py           3/3  (session 10, NEW)
 PASS: test_cleanup_router.py       4    (RBAC approve deny, lifecycle)
 PASS: test_cleanup_store.py        9/9
-PASS: test_downloads.py            4/4  (session 8, NEW)
+PASS: test_downloads.py            8/8  (session 11: +4 GitHub build flow tests)
 PASS: test_glpi_client.py          4/4
 PASS: test_main.py                6
 PASS: test_meshcentral_client.py   3/3
 PASS: test_persistence.py          3/3  (session 5, new)
 PASS: test_pilot_ring.py           9/9
-PASS: test_setup.py               10/10 (session 10, NEW)
+PASS: test_provision_secrets.py 3/3  (session 11, NEW)
+PASS: test_setup.py               15/15 (session 11: +telegram/teams/deps/secret-gen)
 PASS: test_sso_email.py            6/6  (session 5, new)
+PASS: test_teams_alert.py          4/4  (session 11, NEW)
 PASS: test_users.py                4/4  (session 10, NEW)
 PASS: test_version_drift.py        5/5
 PASS: test_wazuh_client.py         4/4
@@ -450,20 +534,24 @@ PowerShell functional (pwsh 7.4.6):
 
 ## Recommended next steps (in order)
 
-1. **DONE (session 6-10):** full backend (**89/89**) + frontend (**12/12**) +
+1. **DONE (session 6-11):** full backend (**105/105**) + frontend (**12/12**) +
    PowerShell Category B flows executed; WiX UpgradeCode set; `index.html` +
    frontend Dockerfile added; **full stack deployed via `setup.sh`** (15
    containers up); **agent-installer distribution added** (`build-agent-installer.ps1`
-   + public `/downloads` page + download API); **one-click setup added and
-   live-tested** (`./install.sh` → setup wizard auto-generates secrets/certs/
-   admin/agent-config → full stack).
+   + public `/downloads` page + download API); **one-click setup live-tested**
+   (`./install.sh` → preflight → blank `.env` → wizard auto-generates all
+   secrets/certs/admin/agent-config → full stack); **multi-channel wizard**
+   (email + Telegram + MS Teams, O365 app-password guidance) + **GitHub-built
+   agent** (`POST /api/agent-installer/build`, `fetch-agent-build.sh`).
 2. **On the real deploy:** run `./install.sh`, enter the real company name, admin
-   email + password, server IP, and the customer's notification mailbox — the
-   wizard writes the full `.env` and the live SMTP send then becomes verifiable.
+   email + password, server IP, notification channels (email/Telegram/Teams) and
+   the GitHub PAT — the wizard writes the full `.env` and the live SMTP send then
+   becomes verifiable.
 3. **`infra/.env`: fill in Azure O365 placeholders** (Azure client/tenant IDs,
-   group IDs, Telegraph/Slack) so portal-backend gets its SSO + report-email
-   credentials — the token source of the Phase 0 spike.
-4. Validate SSO + O365 email against a **real Azure tenant** (Phase 0 spike).
+   group IDs) per `docs/AZURE_SSO_EMAIL.md` so portal-backend gets its SSO +
+   report-email credentials — the token source of the Phase 0 spike.
+4. Validate SSO + O365 email against a **real Azure tenant** (Phase 0 spike) —
+   the checklist is now documented (`docs/AZURE_SSO_EMAIL.md`).
 5. Build + test the **WiX bundle** on a Windows build machine with the `wix` CLI
    + the three vendor MSIs; confirm the MSI property names match the actual
    installers before fleet rollout.

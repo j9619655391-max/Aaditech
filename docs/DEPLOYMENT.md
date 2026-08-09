@@ -18,31 +18,69 @@ separately (`agent-installer/README.md`).
 ## First-time setup
 
 The recommended path is now the **one-click wizard** — `git pull` then a
-single command, and after `docker compose` you land on a setup page:
+single command, and after a host dependency check you land on a setup page:
 
 ```bash
 cd infra
 ./install.sh
 ```
 
-`install.sh` brings up ONLY a temporary `setup` service and prints the wizard
-URL — **http://localhost:8080/setup**. You fill in:
+**Step 0 — preflight.** `install.sh` runs `infra/preflight.sh` first and
+prints a PASS/FAIL/WARN report for every host dependency the stack needs:
+`docker`, `docker compose` (v2), `openssl`, `curl`, `python3`, `mkcert`
+(warn — auto-installed later if missing), all 11 host ports free, disk space
+(≥ 20 GB) and internet. The same report (`infra/.preflight.json`) is rendered
+as a checklist at the top of the setup page. Any **FAIL** aborts install.
+
+**Step 1 — wizard.** `install.sh` brings up ONLY a temporary `setup` service
+and prints **http://localhost:8080/setup**. You fill in:
 
 - Company name
 - Admin username + password (this becomes the local portal login)
 - Local server IP (used for the portal URL, agents, MeshCentral)
-- Notification email — pick your provider (**gmail / hotmail / office365 /
-  hostinger**) and enter only the mailbox **username + password**; the SMTP
-  host, port and TLS mode are configured automatically from the preset.
+- Notification channels — pick **any/all**:
+  - **Email** — provider (**gmail / hotmail / office365 / hostinger**), enter
+    mailbox **username + password** (or an **app password** for MFA-protected
+    accounts, see `docs/AZURE_SSO_EMAIL.md` for Office 365); SMTP host/port/TLS
+    are auto-configured from the preset.
+  - **Telegram** — bot token + chat ID (both together; via @BotFather / @userinfobot).
+  - **MS Teams** — an Incoming Webhook URL from the target channel.
+- GitHub **PAT** (optional) — lets the portal build `Aaditech-Agent-Setup.exe`
+  on GitHub Actions and pull it locally (see "Agent installer" below).
 
-Everything else — all service tokens, the Wazuh agent enrollment key, the
-agent installer answer file (`infra/agent-config.json`), HTTPS certificates
-(with your IP as a SAN), the admin account — is **generated automatically**
-on submit. `install.sh` then stops the wizard, issues certs, and starts the
-full 15-container stack, waiting for the portal to report healthy.
+**Everything is generated automatically on submit** — `infra/.env` starts
+deliberately **blank** (no secrets exist before setup), and the wizard creates
+the whole secret set in one shot: Wazuh API password + agent enrollment key,
+Zabbix DB password + API token, GLPI app/user tokens, OCS DB passwords,
+MeshCentral API key, Grafana admin password + service token, and the portal
+JWT secret. It also writes the agent answer file (`infra/agent-config.json`)
+and creates the bootstrap admin. `install.sh` then stops the wizard, issues
+certs (with your IP as SAN), and starts the full 15-container stack, waiting
+for the portal to report healthy.
 
 Re-running `install.sh` is safe: existing `.env` secrets and certs are reused,
 and the wizard is skipped once `.provisioned` exists.
+
+## Agent installer (`.exe`) — three ways to get it
+
+1. **From the portal** (after setup, easiest): log in, open **Download Agent**,
+   click **Build .exe from GitHub Actions**. Requires the GitHub PAT entered
+   in the wizard (stored as `GITHUB_BUILD_PAT`; needs `actions: read+write`).
+2. **From the Ubuntu host**: `cd infra && ./fetch-agent-build.sh [PAT] [repo]`
+   — triggers `build-agent-installer.yml` and pulls the `.exe` into
+   `infra/installers/`, which is exactly the `/downloads` mount.
+3. **Windows build machine** (Windows-only alternative):
+   `agent-installer/build-agent-installer.ps1` compiles the bundle locally
+   with WiX. Both paths produce the same portable `.exe` — server values are
+   injected at install time, never baked in.
+
+## Azure SSO + Office 365 email
+
+See **`docs/AZURE_SSO_EMAIL.md`** — a complete checklist: why O365 SMTP needs
+an app password (MFA / basic-auth disabled), the two O365 email paths (SMTP
+app password vs Microsoft Graph), and the exact Azure app-registration values
+(`AZURE_CLIENT_ID/SECRET/TENANT_ID`, admin group IDs, redirect URI) that map
+into `infra/.env`.
 
 ### Original manual path
 

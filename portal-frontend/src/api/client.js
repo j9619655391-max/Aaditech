@@ -68,8 +68,11 @@ export const cleanupApi = {
 };
 
 // Public (no auth) — used by the /downloads page and for GPO/Intune rollout.
+// `build` needs a logged-in cleanup_approver; the client attaches the bearer
+// token automatically when present.
 export const agentInstallerApi = {
   info: () => client.get("/agent-installer").then((r) => r.data),
+  build: () => client.post("/agent-installer/build").then((r) => r.data),
   downloadUrl: () => "/api/agent-installer/download",
 };
 

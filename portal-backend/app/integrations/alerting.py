@@ -3,7 +3,7 @@ Alerting backbone (spec §3.6).
 
 Channel roles (do not conflate these — this is the design fix for risk R-1):
 
-  Telegram / Slack   PRIMARY channel for ALL real-time, time-sensitive
+  Telegram / Slack / MS Teams   PRIMARY channel for ALL real-time, time-sensitive
                       alerts (Wazuh security events, Zabbix threshold
                       triggers, SLA escalation tiers, agent offline
                       notices). Independent of O365/Azure AD — keeps
@@ -39,7 +39,7 @@ from app.config import settings
 
 
 class AlertDeliveryError(Exception):
-    """Raised only if BOTH Telegram and Slack fail — surfaced loudly since
+    """Raised only if ALL primary channels fail — surfaced loudly since
     this means the primary alerting backbone itself is down."""
 
 
@@ -60,25 +60,69 @@ async def _send_slack(message: str) -> bool:
         return resp.status_code == 200
 
 
+async def _send_teams(message: str) -> bool:
+    """POST an alert to a Microsoft Teams incoming webhook.
+
+    Accepts both the classic Connector MessageCard payload and the newer
+    Workflow webhook format (adaptive card) — the first 2xx wins, so either
+    webhook style works.
+    """
+    if not settings.teams_webhook_url:
+        return False
+
+    message_card = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": message,
+        "text": message,
+    }
+    adaptive = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": [{"type": "TextBlock", "text": message, "wrap": True}],
+                },
+            }
+        ],
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for payload in (message_card, adaptive):
+            try:
+                resp = await client.post(settings.teams_webhook_url, json=payload)
+                if resp.status_code in (200, 201, 202):
+                    return True
+            except httpx.HTTPError:
+                continue
+    return False
+
+
 async def send_alert(message: str, portal_link: str | None = None) -> dict:
     """
     Sends a time-sensitive alert through the primary backbone (Telegram AND
-    Slack — both configured channels receive it, not either/or, for
-    redundancy). Every alert should include a portal_link back to the
+    Slack AND MS Teams — every configured channel receives it, not either/or,
+    for redundancy). Every alert should include a portal_link back to the
     persistent GLPI/portal entry (system-of-record role, §3.6).
     """
     full_message = message if not portal_link else f"{message}\n\nDetails: {portal_link}"
 
     telegram_ok = await _send_telegram(full_message)
     slack_ok = await _send_slack(full_message)
+    teams_ok = await _send_teams(full_message)
 
-    if not telegram_ok and not slack_ok:
+    if not telegram_ok and not slack_ok and not teams_ok:
         raise AlertDeliveryError(
-            "Both Telegram and Slack delivery failed — the alerting backbone itself "
-            "may be down. This should itself trigger an escalation outside this system."
+            "All primary channels (Telegram, Slack, MS Teams) failed — the alerting "
+            "backbone itself may be down. This should itself trigger an escalation "
+            "outside this system."
         )
 
-    return {"telegram_delivered": telegram_ok, "slack_delivered": slack_ok}
+    return {"telegram_delivered": telegram_ok, "slack_delivered": slack_ok, "teams_delivered": teams_ok}
 
 
 def smtp_configured() -> bool:

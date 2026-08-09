@@ -9,23 +9,25 @@
 #   ./install.sh
 #
 # What it does, in order (stopping immediately if any step fails):
-#   1. Preflight — docker, docker compose, curl, openssl present.
-#   2. Generates infra/.env with all service secrets (if missing) — random
-#      tokens, DB passwords, and a unique Wazuh agent enrollment key.
-#   3. Starts ONLY the temporary `setup` service (compose profile "bootstrap")
+#   0. Preflight — checks docker, docker compose v2, openssl, curl, mkcert,
+#      free host ports and disk space, and prints a dependency report
+#      (infra/preflight.sh → infra/.preflight.json).
+#   1. Prepares infra/.env as a BLANK template (nothing secret exists yet).
+#   2. Starts ONLY the temporary `setup` service (compose profile "bootstrap")
 #      and opens/prints the SETUP WIZARD: http://localhost:8080/setup
 #        * Company name
 #        * Admin username + password
 #        * Local server IP
-#        * Notification email (provider auto-configured:
-#          gmail / hotmail / office365 / hostinger — only username+password
-#          needed)
-#      Everything else — tokens, certificates, endpoints, agent enrollment
-#      key, agent config — is generated automatically on submit.
-#   4. Waits for the wizard to finish (polling /api/setup/status).
-#   5. Stops the setup service and brings up the FULL stack (nginx + portal +
+#        * Notification channels — email (provider auto-configured:
+#          gmail / hotmail / office365 / hostinger, app-password ready for MFA),
+#          Telegram (bot + chat ID), MS Teams (webhook) — pick any/all
+#        * GitHub PAT (optional, for building the agent .exe via Actions)
+#      ALL service secrets (Wazuh, Zabbix, GLPI, OCS, MeshCentral, Grafana,
+#      JWT) and the agent enrollment key are generated on submit.
+#   3. Waits for the wizard to finish (polling /api/setup/status).
+#   4. Stops the setup service and brings up the FULL stack (nginx + portal +
 #      Wazuh + Zabbix + GLPI + OCS + MeshCentral + Grafana) with HTTPS certs.
-#   6. Waits for the portal to be healthy and prints the final summary.
+#   5. Waits for the portal to be healthy and prints the final summary.
 #
 # Re-running is safe: existing .env secrets and certs are reused, and the
 # wizard only appears again if .provisioned is absent.
@@ -44,29 +46,38 @@ echo " Aaditech Platform — one-click deployment"
 echo "=========================================================="
 
 # --- 1. Preflight -----------------------------------------------------------
-for cmd in docker openssl curl; do
-  if ! command -v "$cmd" &>/dev/null; then
-    echo "ERROR: '$cmd' is required but not installed. Install it and re-run."
-    exit 1
-  fi
-done
-if ! docker compose version &>/dev/null; then
-  echo "ERROR: 'docker compose' (v2) not found. Install the Docker Compose plugin and re-run."
+echo ""
+echo "[0/7] Checking host dependencies (preflight)..."
+./preflight.sh
+if [[ $? -ne 0 ]]; then
+  echo "ERROR: one or more CRITICAL host dependencies are missing — see the"
+  echo "preflight report above. Fix them and re-run ./install.sh."
   exit 1
 fi
 
 # --- 2. Secrets ---------------------------------------------------------------
 echo ""
+echo "[1/7] Preparing infra/.env (BLANK — the setup wizard generates every secret)..."
 if [[ -f ".env" ]]; then
-  echo "[1/6] infra/.env already exists — reusing existing secrets."
+  echo "      infra/.env already exists — reusing it."
 else
-  echo "[1/6] Generating all service secrets and the agent enrollment key..."
-  ./generate-secrets.sh
+  # Create a blank template. NOTHING is secret before the wizard runs: every
+  # service token (Wazuh, Zabbix, GLPI, OCS, MeshCentral, Grafana, JWT) and
+  # the agent enrollment key are generated in one shot on wizard submit.
+  python3 - <<'PYEOF'
+import sys
+sys.path.insert(0, "../portal-backend")
+from app.provision_secrets import blank_env
+with open(".env", "w") as fh:
+    fh.write(blank_env())
+print("      Blank .env template written.")
+PYEOF
+  chmod 600 .env
 fi
 
 # --- 3. Bootstrap setup wizard -------------------------------------------------
 echo ""
-echo "[2/6] Starting the setup wizard (this is the ONLY service up for now)..."
+echo "[2/7] Starting the setup wizard (this is the ONLY service up for now)..."
 docker compose --profile bootstrap up -d setup
 
 # --- 4. Wait for the wizard API -------------------------------------------------
@@ -93,8 +104,11 @@ else
   echo "    • Company name"
   echo "    • Admin username + password"
   echo "    • Local server IP"
-  echo "    • Notification email (provider auto-configured:"
-  echo "      gmail / hotmail / office365 / hostinger — just username+password)"
+  echo "    • Notification channels — pick any/all:"
+  echo "        email (provider auto-configured: gmail/hotmail/office365/"
+  echo "                hostinger — username+password, or app password for MFA)"
+  echo "        Telegram (bot token + chat ID)   •   MS Teams (webhook URL)"
+  echo "    • GitHub PAT (optional) — to build the agent .exe via Actions"
   echo "=========================================================="
   echo ""
   echo "Waiting for you to finish the wizard (up to $((MAX_SETUP_WAIT_SECONDS / 60)) minutes)..."
@@ -121,18 +135,18 @@ fi
 
 # --- 5. Full stack --------------------------------------------------------------
 echo ""
-echo "[3/6] Stopping the setup service..."
+echo "[4/7] Stopping the setup service..."
 docker compose stop setup
 
-echo "[4/6] Issuing HTTPS certificates (mkcert, includes your server IP)..."
+echo "[5/7] Issuing HTTPS certificates (mkcert, includes your server IP)..."
 ./setup-certs.sh
 
-echo "[5/6] Starting the FULL stack (portal + Wazuh + Zabbix + GLPI + OCS + MeshCentral + Grafana)..."
+echo "[6/7] Starting the FULL stack (portal + Wazuh + Zabbix + GLPI + OCS + MeshCentral + Grafana)..."
 docker compose up -d
 
 # --- 6. Health check ------------------------------------------------------------
 echo ""
-echo "[6/6] Waiting for the portal to become healthy..."
+echo "[7/7] Waiting for the portal to become healthy..."
 elapsed=0
 until curl -kfs --max-time 3 https://localhost/api/health &>/dev/null; do
   if (( elapsed >= MAX_HEALTH_WAIT_SECONDS )); then

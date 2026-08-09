@@ -30,12 +30,16 @@ PowerShell at all.
 cd infra
 ./install.sh
 ```
-One command. It starts a one-time **setup wizard** at
-`http://localhost:8080/setup` where you enter company name, admin login,
-the server IP, and your notification email (provider auto-configured —
-gmail / hotmail / office365 / hostinger — just username + password). All
-tokens, certificates, endpoints and the agent enrollment key are generated
-automatically; then the full stack comes up. Details:
+One command. It first runs a **host preflight** (docker, compose v2, openssl,
+curl, free ports, disk) and prints a PASS/FAIL report. Then it starts a
+one-time **setup wizard** at `http://localhost:8080/setup` where you enter
+company name, admin login, the server IP, and pick **notification channels**
+— email (provider auto-configured: gmail / hotmail / office365 / hostinger,
+app-password ready for MFA), Telegram (bot token + chat ID) and/or MS Teams
+(webhook). An optional **GitHub PAT** lets the portal build the agent `.exe`
+via Actions. All service tokens, certificates, endpoints and the agent
+enrollment key are generated automatically on submit — before that, `infra/.env`
+is deliberately blank. Then the full stack comes up. Details:
 `docs/DEPLOYMENT.md`.
 
 **2. Each Windows endpoint:**
@@ -51,5 +55,6 @@ Details, and the fleet-wide GPO/Intune path: `agent-installer/README.md`.
 
 - `docs/ARCHITECTURE.md` — component map, full Category B approval flow, RBAC model
 - `docs/DEPLOYMENT.md` — step-by-step, test-running instructions, open items
+- `docs/AZURE_SSO_EMAIL.md` — Azure AD SSO + Office 365 email testing checklist (SMTP/MFA, Graph, app registration)
 - `STATUS.md` — build status, what's verified vs. not, what's still open
 - `Aaditech_IT-Monitoring-Automation-Platform-Spec_v1_4.docx` — the source spec

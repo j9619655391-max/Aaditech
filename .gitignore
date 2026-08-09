@@ -10,11 +10,14 @@ venv/
 
 # Secrets & local env
 infra/.env
+infra/.provisioned
+infra/.preflight.json
 
 # Agent installer build artifacts (downloaded & generated, not committed)
 agent-installer/wix/vendor/
 agent-installer/dist/
 agent-installer/AgentConfig.json
+infra/installers/
 
 # OS / editor
 .DS_Store

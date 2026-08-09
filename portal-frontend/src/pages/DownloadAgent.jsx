@@ -9,6 +9,8 @@ import { agentInstallerApi } from "../api/client";
 export default function DownloadAgent() {
   const [info, setInfo] = useState(null);
   const [error, setError] = useState(null);
+  const [buildState, setBuildState] = useState(null);
+  const hasToken = Boolean(localStorage.getItem("aaditech_session_token"));
 
   useEffect(() => {
     agentInstallerApi
@@ -16,6 +18,22 @@ export default function DownloadAgent() {
       .then(setInfo)
       .catch((err) => setError(err.message));
   }, []);
+
+  async function buildFromActions() {
+    setBuildState({ busy: true, message: "Triggering GitHub Actions build…" });
+    try {
+      const res = await agentInstallerApi.build();
+      setBuildState({ busy: false, message: res.message, ok: true });
+      const fresh = await agentInstallerApi.info();
+      setInfo(fresh);
+    } catch (err) {
+      const msg =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        "Build failed — check GITHUB_BUILD_PAT in infra/.env.";
+      setBuildState({ busy: false, message: msg, ok: false });
+    }
+  }
 
   return (
     <div className="login-screen">
@@ -28,6 +46,24 @@ export default function DownloadAgent() {
         </p>
 
         {error && <p className="error">Failed to check installer: {error}</p>}
+
+        {hasToken && (
+          <>
+            <button
+              className="sso-btn"
+              style={{ width: "100%", marginTop: "0.5rem" }}
+              onClick={buildFromActions}
+              disabled={buildState?.busy}
+            >
+              {buildState?.busy ? "Building on GitHub Actions…" : "Build .exe from GitHub Actions"}
+            </button>
+            {buildState && (
+              <p className={buildState.ok ? "hint" : "error"} style={{ marginTop: "0.5rem" }}>
+                {buildState.message}
+              </p>
+            )}
+          </>
+        )}
 
         {info && !info.available && (
           <p className="error">

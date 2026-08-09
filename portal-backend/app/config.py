@@ -50,10 +50,12 @@ class Settings(BaseSettings):
     smtp_from_address: str = ""
     smtp_use_tls: str = "starttls"   # "starttls" | "ssl" | "none"
 
-    # Alerting backbone (§3.6) — Telegram/Slack primary, empty string disables a channel
+    # Alerting backbone (§3.6) — Telegram/Slack/MS Teams primary, empty string
+    # disables a channel. All three can be configured from the setup wizard.
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     slack_webhook_url: str = ""
+    teams_webhook_url: str = ""
 
     # Office 365 / Azure AD (§7.5) — secondary/reporting channel + SSO only
     azure_client_id: str = ""
@@ -78,6 +80,13 @@ class Settings(BaseSettings):
     # Aaditech-Agent-Setup.exe lives (env-mounted directory). Empty/default
     # => installer reports "not available" instead of a false download.
     installer_dir: str = Field(default="", validation_alias="AADITECH_INSTALLER_DIR")
+
+    # Agent build via GitHub Actions (optional) — POST /api/agent-installer/build
+    # triggers build-agent-installer.yml and pulls the .exe into installer_dir.
+    # PAT needs `actions: read+write` on the repo. Blank => endpoint reports
+    # "not configured" and the .exe must be built manually.
+    github_build_pat: str = ""
+    github_repo: str = "j9619655391-max/Aaditech"
 
     # One-click setup (bootstrap) mode — set only on the temporary `setup`
     # service. When true, the backend serves the setup wizard instead of the

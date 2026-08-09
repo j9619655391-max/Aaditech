@@ -68,12 +68,21 @@ SMTP_PASSWORD=
 SMTP_FROM_ADDRESS=
 SMTP_USE_TLS=starttls
 
-# Alerting backbone (§3.6) — Telegram/Slack are PRIMARY and must be filled in
-# manually (bot token / webhook come from your own Telegram bot & Slack app —
-# these cannot be auto-generated). Leave blank to disable a channel.
+# Alerting backbone (§3.6) — Telegram/Slack/MS Teams are PRIMARY and are filled
+# in either manually or via the one-click setup wizard (bot token / webhook
+# come from your own Telegram bot, Slack app & Teams connector — these cannot
+# be auto-generated). Leave blank to disable a channel.
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 SLACK_WEBHOOK_URL=
+TEAMS_WEBHOOK_URL=
+
+# Agent build via GitHub Actions (optional) — lets the portal trigger a
+# build-agent-installer.yml run and pull Aaditech-Agent-Setup.exe. Blank =>
+# build the .exe manually (build-agent-installer.ps1 on Windows, or
+# infra/fetch-agent-build.sh with a PAT supplied on the command line).
+GITHUB_BUILD_PAT=
+GITHUB_REPO=j9619655391-max/Aaditech
 
 # Office 365 / Azure AD (§7.5) — secondary/reporting channel only, and SSO login.
 # Fill in after completing the Phase 0 Azure app registration spike (§6).

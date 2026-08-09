@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Aaditech Platform — Initial Setup</title>
 <style>
-  :root { --brand:#0b5ed7; --bg:#0f172a; --card:#ffffff; --muted:#64748b; --ok:#16a34a; --err:#dc2626; }
+  :root { --brand:#0b5ed7; --bg:#0f172a; --card:#ffffff; --muted:#64748b; --ok:#16a34a; --err:#dc2626; --warn:#b45309; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:var(--bg);
-         color:#0f172a; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:24px; }
-  .card { background:var(--card); border-radius:14px; padding:34px 36px; max-width:560px; width:100%;
+         color:#0f172a; display:flex; align-items:flex-start; justify-content:center; min-height:100vh; padding:24px; }
+  .card { background:var(--card); border-radius:14px; padding:34px 36px; max-width:640px; width:100%;
           box-shadow:0 20px 60px rgba(0,0,0,.35); }
   h1 { font-size:20px; margin:0 0 4px; }
   .sub { color:var(--muted); font-size:13px; margin:0 0 22px; }
@@ -19,13 +19,24 @@
   input:focus, select:focus { outline:2px solid var(--brand); border-color:transparent; }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .hint { font-size:11px; color:var(--muted); margin-top:4px; }
+  section.channel { border:1px solid #e2e8f0; border-radius:10px; padding:6px 16px 14px; margin-top:18px; background:#fbfdff; }
+  section.channel > label.channel-title { color:var(--brand); font-size:13px; text-transform:uppercase; letter-spacing:.4px; }
   button { margin-top:24px; width:100%; padding:12px; font-size:15px; font-weight:600; color:#fff;
            background:var(--brand); border:0; border-radius:8px; cursor:pointer; }
   button:disabled { opacity:.55; cursor:not-allowed; }
   .msg { margin-top:14px; padding:10px 12px; border-radius:8px; font-size:13px; display:none; }
   .msg.err { display:block; background:#fef2f2; color:var(--err); border:1px solid #fecaca; }
   .msg.ok { display:block; background:#f0fdf4; color:var(--ok); border:1px solid #bbf7d0; white-space:pre-line; }
-  #smtpHint { background:#f1f5f9; border-radius:8px; padding:8px 10px; font-size:12px; color:#334155; }
+  #smtpHint { background:#f1f5f9; border-radius:8px; padding:8px 10px; font-size:12px; color:#334155; margin-top:10px; }
+  .deps { margin:0 0 4px; padding:0; list-style:none; }
+  .deps li { font-size:12px; padding:4px 0 4px 22px; position:relative; color:#334155; }
+  .deps li::before { content:"?"; position:absolute; left:0; top:4px; font-weight:700; width:15px; height:15px;
+                     font-size:10px; line-height:15px; text-align:center; border-radius:50%; color:#fff; }
+  .deps li.pass::before { content:"✓"; background:var(--ok); }
+  .deps li.fail::before { content:"✕"; background:var(--err); }
+  .deps li.warn::before { content:"!"; background:var(--warn); }
+  .deps-title { font-size:12px; font-weight:700; color:#334155; margin:0 0 6px; }
+  .deps-none { font-size:11px; color:var(--muted); margin:0; }
 </style>
 </head>
 <body>
@@ -35,7 +46,8 @@
       agent enrollment keys, endpoints — is generated automatically after you
       submit this form.</p>
 
-    <div id="smtpHint" style="display:none"></div>
+    <p class="deps-title">Host dependency check (from install.sh preflight)</p>
+    <ul id="deps" class="deps"><li class="deps-none">Checking…</li></ul>
 
     <label for="company">Company name</label>
     <input id="company" autocomplete="organization" placeholder="Acme Corp" />
@@ -56,25 +68,77 @@
     <div class="hint">The IP endpoints reach this server on — used for agents,
       MeshCentral and the portal URL. Detected automatically on most hosts.</div>
 
-    <label for="provider">Notification email provider</label>
-    <select id="provider">
-      <option value="gmail">Gmail</option>
-      <option value="hotmail">Hotmail / Outlook.com</option>
-      <option value="office365">Office 365</option>
-      <option value="hostinger">Hostinger</option>
-      <option value="other">Other / custom SMTP</option>
-    </select>
-    <div class="hint">Only your mailbox username and password are needed — the SMTP
-      host, port and TLS settings for the provider are configured automatically.</div>
+    <section class="channel">
+      <label class="channel-title">Notification — Email (optional)</label>
+      <label for="provider">Email provider</label>
+      <select id="provider">
+        <option value="off">Skip email — use another channel</option>
+        <option value="gmail">Gmail</option>
+        <option value="hotmail">Hotmail / Outlook.com</option>
+        <option value="office365">Office 365</option>
+        <option value="hostinger">Hostinger</option>
+        <option value="other">Other / custom SMTP</option>
+      </select>
+      <div class="hint">Only your mailbox username and password are needed — the SMTP
+        host, port and TLS settings for the provider are configured automatically.</div>
+      <div id="smtpHint" style="display:none"></div>
 
-    <label for="email">Email address</label>
-    <input id="email" type="email" placeholder="alerts@acme.com" />
-    <label for="emailUser">Email username</label>
-    <input id="emailUser" placeholder="alerts@acme.com" />
-    <label for="emailPass">Email password / app password</label>
-    <input id="emailPass" type="password" autocomplete="off" placeholder="••••••••" />
-    <div class="hint">For Gmail, create an <b>app password</b> (Google account →
-      Security → App passwords). For Office 365 / Hotmail use the mailbox login.</div>
+      <div id="emailFields" style="display:none">
+        <label for="email">Email address</label>
+        <input id="email" type="email" placeholder="alerts@acme.com" />
+        <label for="emailUser">Email username</label>
+        <input id="emailUser" placeholder="alerts@acme.com" />
+        <label for="emailPass">Email password / app password</label>
+        <input id="emailPass" type="password" autocomplete="off" placeholder="••••••••" />
+        <div id="o365Note" style="display:none; background:#fffbeb; border:1px solid #fde68a; border-radius:8px;
+             padding:8px 10px; font-size:12px; color:#92400e; margin-top:8px;">
+          <b>Office 365 / Microsoft 365 now disables basic SMTP login</b> (security default +
+          MFA). To use SMTP you must enable one of these:
+          <ul style="margin:6px 0 0 18px; padding:0;">
+            <li><b>App password</b> (easiest): turn off MFA requirement for SMTP or enable
+              "App passwords" in your tenant, then paste the 16-char app password here. Requires
+              SMTP AUTH to be enabled for the mailbox.</li>
+            <li><b>OAuth2 / Microsoft Graph</b> (recommended for production): complete the Azure
+              app registration (see docs/DEPLOYMENT.md §Azure), leave email blank here, and the
+              portal sends reports via Graph instead of SMTP.</li>
+          </ul>
+        </div>
+        <div class="hint">For Gmail, create an <b>app password</b> (Google account → Security →
+          App passwords). For Hotmail/Outlook use the mailbox login or an app password.</div>
+      </div>
+    </section>
+
+    <section class="channel">
+      <label class="channel-title">Notification — Telegram (optional)</label>
+      <div class="row">
+        <div>
+          <label for="tgToken">Bot token</label>
+          <input id="tgToken" autocomplete="off" placeholder="123456:ABC-DEF…" />
+        </div>
+        <div>
+          <label for="tgChat">Chat ID</label>
+          <input id="tgChat" autocomplete="off" placeholder="-1001234567890" />
+        </div>
+      </div>
+      <div class="hint">Both are required together. Create a bot with
+        <b>@BotFather</b> and get your chat ID from <b>@userinfobot</b>. Leave blank to skip.</div>
+    </section>
+
+    <section class="channel">
+      <label class="channel-title">Notification — Microsoft Teams (optional)</label>
+      <label for="teamsUrl">Incoming webhook URL</label>
+      <input id="teamsUrl" autocomplete="off" placeholder="https://outlook.office.com/webhook/…" />
+      <div class="hint">Teams → channel → … → Connectors → add <b>Incoming Webhook</b>. Leave blank to skip.</div>
+    </section>
+
+    <section class="channel">
+      <label class="channel-title">Agent build — GitHub token (optional)</label>
+      <label for="githubPat">Personal access token (PAT)</label>
+      <input id="githubPat" autocomplete="off" placeholder="github_pat_… (fine-grained, actions:read+write)" />
+      <div class="hint">Lets the portal build <b>Aaditech-Agent-Setup.exe</b> via GitHub Actions and
+        pull it locally (see the Download Agent page). Leave blank to build the agent manually with
+        <b>agent-installer/build-agent-installer.ps1</b> (Windows) or <b>infra/fetch-agent-build.sh</b> (Linux).</div>
+    </section>
 
     <button id="go">Generate everything &amp; finish setup</button>
     <div id="msg" class="msg"></div>
@@ -82,6 +146,31 @@
 
 <script>
   const $ = (id) => document.getElementById(id);
+
+  // ---- Host dependency checklist (written by infra/preflight.sh) ----
+  async function loadDeps() {
+    const list = $("deps");
+    try {
+      const resp = await fetch("/api/setup/status");
+      const st = await resp.json();
+      const deps = st.dependencies || {};
+      const items = deps.items || [];
+      if (!items.length) {
+        list.innerHTML = "<li class='deps-none'>No preflight report found — run <code>./install.sh</code> (it checks host dependencies before this wizard).</li>";
+        return;
+      }
+      list.innerHTML = "";
+      for (const it of items) {
+        const li = document.createElement("li");
+        li.className = "pass fail warn".includes(it.status) ? it.status : "warn";
+        li.textContent = it.name + (it.message ? " — " + it.message : "");
+        list.appendChild(li);
+      }
+    } catch (e) {
+      list.innerHTML = "<li class='deps-none'>Could not load host dependency report.</li>";
+    }
+  }
+  loadDeps();
 
   fetch("/api/setup/presets").catch(() => {});
 
@@ -97,36 +186,51 @@
     rtc.createOffer().then((o) => rtc.setLocalDescription(o)).catch(() => {});
   } catch (e) {}
 
-  $("provider").addEventListener("change", () => {
+  const hints = {
+    gmail: "Gmail — smtp.gmail.com:465 (SSL). Use an app password.",
+    hotmail: "Hotmail/Outlook — smtp-mail.outlook.com:587 (STARTTLS).",
+    office365: "Office 365 — smtp.office365.com:587 (STARTTLS).",
+    hostinger: "Hostinger — smtp.hostinger.com:465 (SSL).",
+    other: "Custom SMTP — enter host/port/TLS details in infra/.env after setup if different.",
+    off: "",
+  };
+
+  function applyProvider() {
     const p = $("provider").value;
-    const hints = {
-      gmail: "Gmail — smtp.gmail.com:465 (SSL). Use an app password.",
-      hotmail: "Hotmail/Outlook — smtp-mail.outlook.com:587 (STARTTLS).",
-      office365: "Office 365 — smtp.office365.com:587 (STARTTLS).",
-      hostinger: "Hostinger — smtp.hostinger.com:465 (SSL).",
-      other: "Custom SMTP — enter host/port/TLS details in infra/.env after setup if different.",
-    };
-    $("smtpHint").textContent = "Auto-configured: " + (hints[p] || "");
-    $("smtpHint").style.display = "block";
-  });
-  $("provider").dispatchEvent(new Event("change"));
+    $("emailFields").style.display = p === "off" ? "none" : "block";
+    $("o365Note").style.display = p === "office365" || p === "hotmail" ? "block" : "none";
+    $("smtpHint").textContent = hints[p] ? "Auto-configured: " + hints[p] : "";
+    $("smtpHint").style.display = hints[p] ? "block" : "none";
+  }
+  $("provider").addEventListener("change", applyProvider);
+  applyProvider();
 
   $("go").addEventListener("click", async () => {
     const btn = $("go"), msg = $("msg");
     msg.className = "msg"; msg.style.display = "none";
-    const emailUser = $("emailUser").value || $("email").value;
+
+    const provider = $("provider").value;
+    const emailFields = provider === "off"
+      ? { provider: "other", address: "", username: "", password: "" }
+      : {
+          provider,
+          address: $("email").value,
+          username: $("emailUser").value || $("email").value,
+          password: $("emailPass").value,
+        };
 
     const payload = {
       company_name: $("company").value,
       admin_username: $("username").value,
       admin_password: $("password").value,
       local_ip: $("ip").value,
-      email: {
-        provider: $("provider").value,
-        address: $("email").value,
-        username: emailUser,
-        password: $("emailPass").value,
+      email: emailFields,
+      telegram: {
+        bot_token: $("tgToken").value.trim(),
+        chat_id: $("tgChat").value.trim(),
       },
+      teams: { webhook_url: $("teamsUrl").value.trim() },
+      github_pat: $("githubPat").value.trim(),
     };
 
     btn.disabled = true; btn.textContent = "Generating tokens, certificates and enrollment keys…";
@@ -144,6 +248,9 @@
         "• Portal URL: " + data.portal_url + "\n" +
         "• Admin login: " + data.admin_username + "\n" +
         "• Email channel: " + data.email_channel + " via " + data.smtp.host + "\n" +
+        "• Telegram: " + (data.telegram_channel ? "enabled" : "off") + "\n" +
+        "• MS Teams: " + (data.teams_channel ? "enabled" : "off") + "\n" +
+        "• Service secrets generated: " + data.secrets_generated + "\n" +
         "• Agent enrollment key: " + data.enrollment_key + "\n\n" +
         "The installer is now generating HTTPS certificates and starting the full stack. This page will stop working shortly — sign in at the portal URL when it's ready.";
     } catch (err) {
