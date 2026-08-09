@@ -123,16 +123,17 @@ Three roles, additive (§7.1, v1.2):
 
 ## Known deviations from "fully built"
 
-- **Resolved session 6:** with network restored, the full backend test suite
-  now runs (`pip install -r requirements.txt` then `pytest` → 68/68 pass across
-  13 files), all 8 `self-healing/*.ps1` scripts parse clean under pwsh 7.4.6
-  and the Category B quarantine/restore/purge flow was functionally executed,
-  and the frontend `npm ci`/`npm test` (11/11)/`npm run build` all succeed.
-  Two backend bugs surfaced by actually executing the tests were fixed:
-  SQLite thread-safety (`check_same_thread=False` + RLock in
-  `cleanup_store.py` / `agent_commands.py`), and the unwritable
-  `/var/log/aaditech` default path in `app/audit.py` / `app/health_log.py`
-  (now degrades gracefully to a per-user temp location instead of 500ing).
+- **Resolved session 6 (superseded):** with network restored, the full backend
+  test suite now runs (`pip install -r requirements.txt` then `pytest` —
+  68/68 at the time, **105/105 as of session 11**), all 8 `self-healing/*.ps1`
+  scripts parse clean under pwsh 7.4.6 and the Category B
+  quarantine/restore/purge flow was functionally executed, and the frontend
+  `npm ci`/`npm test`/`npm run build` all succeed. Two backend bugs surfaced
+  by actually executing the tests were fixed: SQLite thread-safety
+  (`check_same_thread=False` + RLock in `cleanup_store.py` /
+  `agent_commands.py`), and the unwritable `/var/log/aaditech` default path
+  in `app/audit.py` / `app/health_log.py` (now degrades gracefully to a
+  per-user temp location instead of 500ing).
 - `agent-installer/` ships the WiX bundle definition and PSADT script, but
   not the vendor MSIs themselves (must be downloaded separately) — see
   `agent-installer/README.md`. The WiX `UpgradeCode` is a real GUID now.

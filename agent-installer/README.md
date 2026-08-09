@@ -104,12 +104,30 @@ Only the MeshCentral piece is baked at build time (its agent binary is
 generated per-portal/device-group), so including it needs two extra secrets
 (`AGENT_MESH_URL`, `AGENT_MESH_ID`) and the `include_mesh` input on.
 
+### Triggering + pulling the build from the server (no Windows needed)
+
+You don't have to open the Actions tab at all. Give the deployment a GitHub
+PAT (wizard field "GitHub token", stored as `GITHUB_BUILD_PAT` — needs
+`actions: read+write`) and either:
+
+- **From the portal** — log in → **Download Agent** → **Build .exe from
+  GitHub Actions**. The backend (`POST /api/agent-installer/build`) dispatches
+  the workflow, waits for it to finish, downloads the artifact and drops
+  `Aaditech-Agent-Setup.exe` straight into the `/downloads` mount.
+- **From the Ubuntu host** — `cd infra && ./fetch-agent-build.sh [PAT] [repo]`
+  does the same with curl + python3 (no Windows, no portal login). Output:
+  `infra/installers/Aaditech-Agent-Setup.exe`.
+
+Both are the *portable* build — no server values baked in — so they suit a
+Linux-only deployment. The Windows-local `build-agent-installer.ps1` path
+above remains for build machines without GitHub access.
+
 ## Publishing to the fleet (web download page)
 
-Once built, put `dist/Aaditech-Agent-Setup.exe` on the server where the
-portal backend can serve it (host directory mounted into the container, see
-`infra/docker-compose.yml` → `AADITECH_INSTALLER_DIR`). The portal then
-exposes it:
+Once built (by the portal build button, `fetch-agent-build.sh`, or manually),
+put `dist/Aaditech-Agent-Setup.exe` in `infra/installers/` — that host
+directory is mounted into the portal backend (see `infra/docker-compose.yml`
+→ `AADITECH_INSTALLER_DIR`). The portal then exposes it:
 
 - **Web page** — `https://portal.aaditech.local/downloads` (public, no
   login needed): a big "Download Aaditech Agent" button with size + a copyable
