@@ -83,9 +83,12 @@ $wazuhVer = $config.wazuhAgentVersion
 $zbxVer   = $config.zabbixAgentVersion
 $zbxMM    = (($zbxVer -split '\.')[0..1] -join '.')
 
-$wazuhMsi = Join-Path $vendorDir "wazuh-agent-$wazuhVer-1.msi"
-$zbxMsi   = Join-Path $vendorDir "zabbix_agent2-$zbxVer-windows-amd64-openssl.msi"
-$meshExe  = Join-Path $vendorDir "aaditech-mesh-agent.exe"
+# Canonical names the WXS bundle references (wix/AaditechAgentBundle.wxs).
+# Downloading to these exact names keeps the local build in sync with the
+# CI path (which also stages unversioned vendor\*.msi files).
+$wazuhMsi  = Join-Path $vendorDir "wazuh-agent.msi"
+$zbxMsi    = Join-Path $vendorDir "zabbix-agent.msi"
+$meshExe   = Join-Path $vendorDir "meshcentral-agent.exe"
 
 if (-not (Test-Path $wazuhMsi)) {
     Write-Step "Downloading Wazuh agent ($wazuhVer)..."
@@ -117,7 +120,8 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 $outputExe  = Join-Path $OutputDir "Aaditech-Agent-Setup.exe"
 
 Write-Step "Compiling bundle → Aaditech-Agent-Setup.exe ..."
-& wix build $bundleWxs -ext WixToolset.Bal.wixext -o $outputExe
+$includeMesh = if ($SkipMesh) { "0" } else { "1" }
+& wix build $bundleWxs -ext WixToolset.Bal.wixext -d "IncludeMesh=$includeMesh" -o $outputExe
 if ($LASTEXITCODE -ne 0) { throw "wix build failed (exit $LASTEXITCODE). See messages above." }
 
 Write-Host ""

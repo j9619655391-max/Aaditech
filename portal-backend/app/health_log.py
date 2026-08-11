@@ -62,6 +62,7 @@ def read_health_events(limit: int = 100, severity: str | None = None) -> list[di
     if not path.exists():
         return []
     with open(path, encoding="utf-8") as f:
+        entries: list[dict] = []
         for line in f:
             line = line.strip()
             if not line:

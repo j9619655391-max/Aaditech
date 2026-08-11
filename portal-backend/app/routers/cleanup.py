@@ -36,12 +36,14 @@ from app.audit import AuditAction, write_audit_entry
 from app.cleanup_store import (
     approve_items,
     create_scan_report,
-    find_expired_quarantine_items,
     get_scan_report,
     list_scan_reports,
+    mark_item_purged,
     restore_item,
 )
 from app.config import settings
+from app.auth import require_service_token
+from app.ilm import run_purge_cycle
 from app.roles import require_cleanup_approver, require_viewer
 
 router = APIRouter(prefix="/cleanup", tags=["cleanup"])
@@ -204,46 +206,20 @@ async def restore_quarantined_item(
 
 
 @router.post("/purge-expired")
-async def purge_expired_quarantine_items():
+async def purge_expired_quarantine_items(svc: dict = Depends(require_service_token)):
     """
-    Driven by the existing ILM cron job (§3.3, §7.4) — NOT engineer-triggered.
-    Finds every quarantined item whose hold window has passed and marks it
-    for permanent purge. The actual file deletion happens on the endpoint
-    (agent picks up the purge list); this endpoint owns the authoritative
-    "which items are past their window" decision and the audit trail.
+    Driven by the ILM scheduler (app/ilm.py, §3.3, §7.4) — NOT
+    engineer-triggered. Finds every quarantined item whose hold window has
+    passed and marks it for permanent purge. The actual file deletion happens
+    on the endpoint (agent picks up the purge list); this endpoint owns the
+    authoritative "which items are past their window" decision and the audit
+    trail.
 
-    No RBAC role check here deliberately — this is a system/cron-triggered
-    action (called with a service credential, not a user session), distinct
-    from the human "Approve & Execute" and "Restore" actions above which
-    both require the Cleanup Approver role.
+    Requires a SERVICE token (minted via POST /agent-installer/token) — a
+    machine/cron credential, not a user session. Closes the prior gap where
+    this action was callable by anyone on the network (finding H4).
     """
-    expired = find_expired_quarantine_items()
-
-    purge_list = []
-    for report, item in expired:
-        write_audit_entry(
-            AuditAction.CATEGORY_B_PURGE,
-            actor="system:ilm-cron",
-            details={
-                "report_id": report.report_id,
-                "item_id": item.item_id,
-                "quarantine_path": item.quarantine_path,
-                "hold_type": item.hold_type.value,
-                "expired_at": item.quarantine_expires_at,
-            },
-        )
-        command = enqueue_command(
-            endpoint_id=report.endpoint_id,
-            command_type=CommandType.PURGE,
-            payload={"item_id": item.item_id, "quarantine_path": item.quarantine_path},
-        )
-        purge_list.append({
-            "quarantine_path": item.quarantine_path,
-            "item_id": item.item_id,
-            "command_id": command.command_id,
-        })
-
-    return {"purged_count": len(purge_list), "items": purge_list}
+    return run_purge_cycle()
 
 
 # --- Agent-facing command channel -------------------------------------------
@@ -281,6 +257,23 @@ async def complete_command_route(
     approval/restore decision; this closes the loop on whether the endpoint
     action actually happened."""
     try:
-        return complete_command(command_id, success=payload.success, result=payload.result)
+        result = complete_command(command_id, success=payload.success, result=payload.result)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # Finding 5.5: a successfully-executed PURGE must transition the item
+    # QUARANTINED → PURGED — the file is gone, the portal state must match.
+    if (
+        payload.success
+        and result.command_type == CommandType.PURGE
+        and result.payload.get("item_id")
+    ):
+        try:
+            mark_item_purged(result.payload["item_id"])
+        except (KeyError, ValueError):
+            # Command succeeded but the store no longer has the item (already
+            # purged/removed) — not an error for the agent, the end state is
+            # the same.
+            pass
+
+    return result

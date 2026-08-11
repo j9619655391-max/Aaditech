@@ -275,6 +275,25 @@ def restore_item(report_id: str, item_id: str) -> ScanItem:
     raise KeyError(f"No such item: {item_id}")
 
 
+def mark_item_purged(item_id: str) -> ScanItem:
+    """Final QUARANTINED → PURGED transition (finding 5.5): called once the
+    endpoint's agent confirms the purge deletion actually ran. Without this,
+    an item's portal status would stay 'quarantined' forever even though the
+    file is gone — the store must reflect reality."""
+    for report in _ensure_cache().values():
+        for item in report.items:
+            if item.item_id != item_id:
+                continue
+            if item.status != ItemStatus.QUARANTINED:
+                raise ValueError(
+                    f"Item {item_id} is not in quarantine (status={item.status})"
+                )
+            item.status = ItemStatus.PURGED
+            _save_report(report)
+            return item
+    raise KeyError(f"No such item: {item_id}")
+
+
 def find_expired_quarantine_items() -> list[tuple[ScanReport, ScanItem]]:
     """Used by the ILM-driven purge job (§3.3, §7.4) to find items whose hold window has passed."""
     now = datetime.now(timezone.utc)

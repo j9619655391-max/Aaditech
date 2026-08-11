@@ -22,13 +22,13 @@ on:
   workflow_dispatch:
     inputs:
       wazuh_version:
-        description: Wazuh agent version (e.g. 4.14.5)
+        description: Wazuh agent version (e.g. 4.9.0)
         required: false
-        default: '4.14.5'
+        default: '4.9.0'
       zabbix_version:
-        description: Zabbix agent2 version (e.g. 7.4.3)
+        description: Zabbix agent2 version (e.g. 6.4.20)
         required: false
-        default: '7.4.3'
+        default: '6.4.20'
       include_mesh:
         description: Include MeshCentral agent (requires AGENT_MESH group)
         required: false
@@ -68,8 +68,8 @@ jobs:
         id: versions
         shell: pwsh
         run: |
-          $waz = "${{ inputs.wazuh_version || '4.14.5' }}"
-          $zbx = "${{ inputs.zabbix_version || '7.4.3' }}"
+          $waz = "${{ inputs.wazuh_version || '4.9.0' }}"
+          $zbx = "${{ inputs.zabbix_version || '6.4.20' }}"
           $zbxmm = ($zbx -split '\.')[0..1] -join '.'
           "WAZUH_VERSION=$waz"        | Out-File $env:GITHUB_ENV -Encoding utf8
           "ZABBIX_VERSION=$zbx"       | Out-File $env:GITHUB_ENV -Encoding utf8

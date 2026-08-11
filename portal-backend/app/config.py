@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # MeshCentral
     meshcentral_api_url: str = "https://meshcentral:443"
     meshcentral_api_key: str
+    # Browser-reachable base (portal host) — the embedded remote-session
+    # iframe points here (via nginx /meshcentral/ + /api/remote/ws/), never
+    # at the internal container name the end user can't resolve.
+    meshcentral_public_url: str = "https://portal.aaditech.local"
 
     # Grafana
     grafana_url: str = "http://grafana:3000"
@@ -34,12 +38,9 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 480
-    portal_env: str = "development"
 
     # Deployment identity (set by the one-click setup wizard)
     company_name: str = ""
-    portal_ip: str = ""
-    wazuh_enroll_key: str = ""
 
     # Email notification channel (SMTP) — auto-filled by the setup wizard from
     # the chosen provider preset (gmail/hotmail/office365/hostinger).
@@ -92,6 +93,13 @@ class Settings(BaseSettings):
     agent_scripts_dir: str = Field(default="", validation_alias="AADITECH_AGENT_SCRIPTS_DIR")
     certs_dir: str = Field(default="", validation_alias="AADITECH_CERTS_DIR")
 
+    # Internal TLS policy: every backend→tool HTTPS call (Wazuh, Zabbix,
+    # MeshCentral, Grafana) verifies against the mkcert root CA exported by
+    # setup-certs.sh (rootCA.pem in the mounted certs dir). This replaces the
+    # old split of verify=True/verify=False — one consistent policy for all.
+    # Empty => verify=False (dev/tests without a mounted CA).
+    ca_cert_path: str = Field(default="", validation_alias="AADITECH_CA_CERT_PATH")
+
     # Agent build via GitHub Actions (optional) — POST /api/agent-installer/build
     # triggers build-agent-installer.yml and pulls the .exe into installer_dir.
     # PAT needs `actions: read+write` on the repo. Blank => endpoint reports
@@ -108,6 +116,14 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+
+    def tls_verify(self) -> str | bool:
+        """Verify value for httpx against the mkcert root CA when mounted,
+        otherwise fall back to verify=False (internal network, dev/tests)."""
+        if self.ca_cert_path:
+            import os
+            return self.ca_cert_path if os.path.isfile(self.ca_cert_path) else False
+        return False
 
 
 settings = Settings()

@@ -70,6 +70,17 @@ def _provisioned() -> bool:
     return (_infra_dir() / ".provisioned").exists()
 
 
+def _env_value(value: str) -> str:
+    """Serialize a .env value so a '#'/'='/space in it can't corrupt the file.
+    Values are double-quoted (and inner quotes escaped) when needed; the
+    wizard-generated secrets are URL-safe so they pass through unquoted."""
+    value = str(value)
+    if any(ch in value for ch in '# ="'):
+        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
+
+
 def _load_env() -> dict[str, str]:
     env: dict[str, str] = {}
     path = _env_path()
@@ -79,7 +90,10 @@ def _load_env() -> dict[str, str]:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, value = line.partition("=")
-            env[key.strip()] = value.strip()
+            value = value.strip()
+            if value.startswith('"') and value.endswith('"'):
+                value = value[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+            env[key.strip()] = value
     return env
 
 
@@ -103,13 +117,13 @@ def _upsert_env(updates: dict[str, str]) -> None:
         if "=" in line and not stripped.startswith("#"):
             key = line.split("=", 1)[0].strip()
             if key in updates:
-                new_lines.append(f"{key}={updates[key]}")
+                new_lines.append(f"{key}={_env_value(updates[key])}")
                 updated_keys.add(key)
                 continue
         new_lines.append(line)
     for key, value in updates.items():
         if key not in updated_keys:
-            new_lines.append(f"{key}={value}")
+            new_lines.append(f"{key}={_env_value(value)}")
     path.write_text("\n".join(new_lines) + "\n")
 
 
@@ -181,6 +195,7 @@ def _validate_payload(payload: dict) -> dict:
         "admin_username": username,
         "admin_password": password,
         "local_ip": local_ip,
+        "mesh_id": (payload.get("mesh_id") or "").strip(),
         "channels": _validate_channels(payload),
     }
 
@@ -215,6 +230,13 @@ async def setup_presets():
 
 @router.post("/provision")
 async def provision(payload: dict):
+    if not settings.setup_mode:
+        # Provision only exists on the temporary bootstrap service — in normal
+        # portal mode /infra is mounted read-only and writing .env would 500.
+        return JSONResponse(
+            {"configured": True, "message": "Setup only runs on the bootstrap service"},
+            status_code=403,
+        )
     if _provisioned():
         return JSONResponse({"configured": True, "message": "Already provisioned"}, status_code=409)
 
@@ -237,6 +259,8 @@ async def provision(payload: dict):
         "COMPANY_NAME": data["company_name"],
         "PORTAL_IP": data["local_ip"],
         "ADMIN_USERNAME": data["admin_username"],
+        # Wazuh API service account — fixed username, random password above.
+        "WAZUH_API_USER": env.get("WAZUH_API_USER") or "aaditech-portal-svc",
         "SMTP_HOST": smtp_preset["host"],
         "SMTP_PORT": str(smtp_preset["port"]),
         "SMTP_USERNAME": channels["email"]["username"],
@@ -249,6 +273,13 @@ async def provision(payload: dict):
         "GITHUB_BUILD_PAT": channels["github_pat"],
         "GITHUB_REPO": env.get("GITHUB_REPO") or "j9619655391-max/Aaditech",
     })
+    # Optional MeshCentral device-group ID (from the MeshCentral admin UI —
+    # only becomes meaningful once a device group exists). Preserved if the
+    # operator already set it in infra/.env.
+    if (data.get("mesh_id") or "").strip():
+        env_updates["MESHCENTRAL_MESH_ID"] = data["mesh_id"].strip()
+    elif env.get("MESHCENTRAL_MESH_ID"):
+        env_updates["MESHCENTRAL_MESH_ID"] = env["MESHCENTRAL_MESH_ID"]
     _upsert_env(env_updates)
 
     # Refresh enrollment key from the (now complete) env.
@@ -262,12 +293,12 @@ async def provision(payload: dict):
     # the main portal-backend, both read the same infra/.env key.
     agent_config = {
         "managerIp": data["local_ip"],
-        "wazuhAgentVersion": env.get("WAZUH_AGENT_VERSION", "4.14.5"),
+        "wazuhAgentVersion": env.get("WAZUH_AGENT_VERSION", "4.9.0"),
         "wazuhEnrollKey": enroll_key,
         "zabbixServerIp": data["local_ip"],
-        "zabbixAgentVersion": env.get("ZABBIX_AGENT_VERSION", "7.4.3"),
+        "zabbixAgentVersion": env.get("ZABBIX_AGENT_VERSION", "6.4.20"),
         "meshCentralUrl": f"https://{data['local_ip']}:4433",
-        "meshId": env.get("MESHCENTRAL_MESH_ID", ""),
+        "meshId": env.get("MESHCENTRAL_MESH_ID") or env_updates.get("MESHCENTRAL_MESH_ID", ""),
     }
     _infra_agent_config = _infra_dir() / "agent-config.json"
     _infra_agent_config.write_text(

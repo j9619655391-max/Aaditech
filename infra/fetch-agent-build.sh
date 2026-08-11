@@ -46,7 +46,7 @@ GH_HEADERS=(-H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2
 echo "==> Triggering ${WORKFLOW} on ${REPO} ..."
 curl -fs -X POST "${GH_HEADERS[@]}" \
   -H "Content-Type: application/json" \
-  -d '{"ref":"main","inputs":{"wazuh_version":"4.14.5","zabbix_version":"7.4.3"}}' \
+  -d '{"ref":"main","inputs":{"wazuh_version":"4.9.0","zabbix_version":"6.4.20"}}' \
   "${GITHUB_API}/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches" || {
     echo "ERROR: workflow dispatch failed (check PAT permissions: actions: read+write)." >&2; exit 1; }
 

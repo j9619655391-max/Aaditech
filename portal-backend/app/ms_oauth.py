@@ -21,7 +21,13 @@ import urllib.request
 
 AUTHORITY = "https://login.microsoftonline.com"
 GRAPH_MAIL_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
+# Fallback base only — the SSO router derives the real base from the incoming
+# request host (the deployment may be reached by IP, not the DNS hostname).
 PORTAL_BASE_URL = "https://portal.aaditech.local"
+# Azure v2.0 signing keys (public JWKS) — used to verify id_token signatures.
+JWKS_DISCOVERY_URL = (
+    "{authority}/{tenant}/discovery/v2.0/keys"
+)
 
 
 class _LazySettings:
@@ -43,27 +49,110 @@ settings = _LazySettings()
 # SSO (authorization-code grant)
 # ---------------------------------------------------------------------------
 
-def build_authorize_url(state: str) -> str:
+def build_authorize_url(state: str, base_url: str = PORTAL_BASE_URL, nonce: str | None = None) -> str:
     params = {
         "client_id": settings.azure_client_id,
         "response_type": "code",
-        "redirect_uri": f"{PORTAL_BASE_URL}/api/auth/sso/callback",
+        "redirect_uri": f"{base_url.rstrip('/')}/api/auth/sso/callback",
         "scope": "openid profile email",
         "state": state,
-        "nonce": secrets.token_urlsafe(16),
+        "nonce": nonce or secrets.token_urlsafe(16),
         "response_mode": "query",
     }
     return f"{AUTHORITY}/{settings.azure_tenant_id}/oauth2/v2.0/authorize?{urllib.parse.urlencode(params)}"
 
 
 def decode_id_token(id_token: str) -> dict:
-    """Decode an id_token's JWT payload (claims). Signature verification is
-    deferred to the platform's identity stack; the claims we read here are
-    non-authoritative UI-level hints plus the group enumeration used for
-    role mapping."""
+    """Decode an id_token's JWT payload (claims). Use verify_id_token() to
+    cryptographically validate it before trusting any claim."""
     payload = id_token.split(".")[1]
     payload += "=" * (-len(payload) % 4)
     return json.loads(base64.urlsafe_b64decode(payload))
+
+
+def verify_id_token(id_token: str, nonce: str | None = None) -> dict:
+    """Validate an Azure AD v2.0 id_token BEFORE treating any claim as
+    identity (finding 3.3):
+      - signature against the tenant's public JWKS (kid-matched)
+      - audience == AZURE_CLIENT_ID
+      - issuer == https://login.microsoftonline.com/{tenant}/v2.0
+      - expiry
+      - nonce (replay protection) when supplied
+
+    Returns the verified claims on success, raises ValueError otherwise.
+    Raises RuntimeError if the signing keys can't be fetched.
+    """
+    import base64 as _b64
+    import json as _json
+
+    from jose import jwt as _jwt
+
+    if not azure_configured():
+        raise ValueError("Azure AD SSO is not configured")
+
+    try:
+        header = _jwt.get_unverified_header(id_token)
+    except Exception as exc:
+        raise ValueError(f"invalid id_token header: {exc}") from exc
+    kid = header.get("kid")
+    if not kid:
+        raise ValueError("id_token has no kid")
+
+    keys = _fetch_jwks()
+    if kid not in keys:
+        raise ValueError("id_token kid not found in tenant signing keys")
+
+    try:
+        claims = _jwt.decode(
+            id_token,
+            keys[kid],
+            algorithms=[header.get("alg", "RS256")],
+            audience=settings.azure_client_id,
+            issuer=f"{AUTHORITY}/{settings.azure_tenant_id}/v2.0",
+            options={"require_exp": True, "require_iat": True},
+        )
+    except Exception as exc:
+        raise ValueError(f"id_token verification failed: {exc}") from exc
+
+    if nonce and claims.get("nonce") != nonce:
+        raise ValueError("id_token nonce mismatch (possible replay)")
+    return claims
+
+
+_jwks_cache: tuple[dict, float] | None = None
+
+
+def _fetch_jwks() -> dict[str, str]:
+    """Fetch the tenant's public signing keys (JWKS) and return {kid: key-as-pem}.
+    Cached for an hour to avoid hammering the discovery endpoint."""
+    import time
+
+    global _jwks_cache
+    now = time.time()
+    if _jwks_cache and now - _jwks_cache[1] < 3600:
+        return _jwks_cache[0]
+
+    url = JWKS_DISCOVERY_URL.format(authority=AUTHORITY, tenant=settings.azure_tenant_id)
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - Azure discovery endpoint
+        document = json.loads(resp.read().decode("utf-8"))
+
+    from jose import jwk as _jwk
+
+    keys: dict[str, str] = {}
+    for key in document.get("keys", []):
+        k = key.get("kid")
+        if not k:
+            continue
+        try:
+            public = _jwk.construct(key).to_pem()
+        except Exception:
+            continue
+        keys[k] = public
+    if not keys:
+        raise RuntimeError("Azure JWKS contained no usable keys")
+    _jwks_cache = (keys, now)
+    return keys
 
 
 def roles_from_claims(claims: dict) -> list[str]:
@@ -83,7 +172,7 @@ def roles_from_claims(claims: dict) -> list[str]:
     return sorted(roles)
 
 
-def exchange_code_for_tokens(code: str) -> dict:
+def exchange_code_for_tokens(code: str, base_url: str = PORTAL_BASE_URL) -> dict:
     """POST an authorization code to the v2.0 token endpoint (uses the app's
     client secret). Returns the raw token response."""
     body = urllib.parse.urlencode({
@@ -91,7 +180,7 @@ def exchange_code_for_tokens(code: str) -> dict:
         "client_secret": settings.azure_client_secret,
         "code": code,
         "grant_type": "authorization_code",
-        "redirect_uri": f"{PORTAL_BASE_URL}/api/auth/sso/callback",
+        "redirect_uri": f"{base_url.rstrip('/')}/api/auth/sso/callback",
         "scope": "openid profile email",
     }).encode("utf-8")
     token_url = f"{AUTHORITY}/{settings.azure_tenant_id}/oauth2/v2.0/token"

@@ -51,6 +51,19 @@ async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(securit
     return {"username": payload["sub"], "roles": payload.get("roles", [])}
 
 
+async def require_service_token(creds: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Requires a JWT minted by create_service_token (payload['service'] True).
+    Used for machine/cron endpoints (e.g. ILM purge) so an anonymous caller
+    can never trigger them — closes the unauth `purge-expired` finding H4."""
+    payload = decode_access_token(creds.credentials)
+    if not payload.get("service"):
+        raise HTTPException(
+            status_code=403,
+            detail="Requires a service token",
+        )
+    return {"username": payload["sub"], "roles": payload.get("roles", []), "service": True}
+
+
 def require_role(role: str):
     async def _checker(user: dict = Depends(get_current_user)) -> dict:
         if role not in user["roles"]:

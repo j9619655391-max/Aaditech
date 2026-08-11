@@ -1,7 +1,7 @@
 """Integration tests for the Category B cleanup router. Run with: pytest tests/test_cleanup_router.py"""
 from fastapi.testclient import TestClient
 
-from app.auth import create_access_token
+from app.auth import create_access_token, create_service_token
 from app.main import app
 
 client = TestClient(app)
@@ -87,10 +87,23 @@ def test_cleanup_approver_can_approve_and_restore():
     assert any(c["command_id"] == body["command_id"] for c in pending.json())
 
 
-def test_purge_expired_has_no_rbac_gate_but_is_system_only_by_convention():
-    # No auth header at all — purge is meant to be called by the ILM cron
-    # job with a service credential, not a user session; documented as such
-    # in the router. This test just confirms the endpoint responds cleanly.
-    resp = client.post("/cleanup/purge-expired")
+def test_purge_expired_rejects_anonymous_and_user_tokens():
+    # Finding H4: purge must be callable ONLY with a machine/cron service
+    # credential (untrusted "service eats its own dog food" contract) — a
+    # plain network caller or an ordinary user session must be refused.
+    anonymous = client.post("/cleanup/purge-expired")
+    assert anonymous.status_code == 403
+
+    user_token = client.post(
+        "/cleanup/purge-expired",
+        headers=_headers(["cleanup_approver"]),
+    )
+    assert user_token.status_code == 403
+
+    service = create_service_token("ilm-scheduler", [])
+    resp = client.post(
+        "/cleanup/purge-expired",
+        headers={"Authorization": f"Bearer {service}"},
+    )
     assert resp.status_code == 200
     assert "purged_count" in resp.json()

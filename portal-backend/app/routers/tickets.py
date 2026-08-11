@@ -17,6 +17,7 @@ def get_glpi_client() -> GLPIClient:
         base_url=settings.glpi_api_url,
         app_token=settings.glpi_app_token,
         user_token=settings.glpi_user_token,
+        verify=settings.tls_verify(),
     )
 
 
@@ -37,10 +38,16 @@ async def create_ticket(payload: TicketCreateRequest, user: dict = Depends(requi
         urgency=payload.urgency,
         category_id=payload.category_id,
     )
+    # Finding 3.10: log only a sanitized summary, NEVER the raw GLPI response
+    # body (it can carry server internals / sensitive ticket content into the
+    # audit trail).
+    glpi_id = None
+    if isinstance(result, dict):
+        glpi_id = result.get("id")
     write_audit_entry(
         AuditAction.TICKET_CREATED,
         actor=user["username"],
-        details={"ticket_title": payload.title, "glpi_response": result},
+        details={"ticket_title": payload.title, "glpi_ticket_id": glpi_id},
     )
     return result
 
@@ -48,7 +55,13 @@ async def create_ticket(payload: TicketCreateRequest, user: dict = Depends(requi
 @router.get("/open")
 async def list_open(user: dict = Depends(require_support_engineer)):
     client = get_glpi_client()
-    return await client.list_open_tickets()
+    raw = await client.list_open_tickets()
+    # Finding 5.8: GLPI may return a bare list OR a pagination envelope
+    # ({"0": {...}, "1": {...}, ...} with a "count" key). The frontend always
+    # consumes a plain array via .map(), so normalize both shapes here.
+    if isinstance(raw, dict) and "count" in raw:
+        raw = [v for k, v in raw.items() if k != "count"]
+    return raw
 
 
 @router.get("/{ticket_id}")

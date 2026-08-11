@@ -1,10 +1,10 @@
 {
   "_comment": "Copy to AgentConfig.json (same folder) and fill in real values ONCE — this is the only manual step, since these values are specific to your deployment and can't be guessed or downloaded. Then run one-click-install.ps1.",
   "managerIp": "10.0.0.10",
-  "wazuhAgentVersion": "4.14.5",
+  "wazuhAgentVersion": "4.9.0",
   "wazuhEnrollKey": "REPLACE_WITH_REAL_ENROLLMENT_KEY",
   "zabbixServerIp": "10.0.0.10",
-  "zabbixAgentVersion": "7.4.3",
+  "zabbixAgentVersion": "6.4.20",
   "meshCentralUrl": "https://portal.aaditech.local:4433",
   "meshId": "REPLACE_WITH_REAL_MESH_ID_FROM_YOUR_PORTAL"
 }

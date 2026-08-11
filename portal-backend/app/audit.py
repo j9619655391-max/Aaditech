@@ -84,6 +84,7 @@ def read_audit_entries(limit: int = 100, action: AuditAction | None = None) -> l
         return []
 
     with open(path, encoding="utf-8") as f:
+        entries: list[dict] = []
         for line in f:
             line = line.strip()
             if not line:

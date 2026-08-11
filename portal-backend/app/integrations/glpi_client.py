@@ -15,11 +15,13 @@ class GLPIAuthError(Exception):
 
 
 class GLPIClient:
-    def __init__(self, base_url: str, app_token: str, user_token: str, timeout: float = 10.0):
+    def __init__(self, base_url: str, app_token: str, user_token: str, timeout: float = 10.0,
+                 verify: str | bool = True):
         self.base_url = base_url.rstrip("/")
         self.app_token = app_token
         self.user_token = user_token
         self.timeout = timeout
+        self.verify = verify
         self._session_token: str | None = None
 
     async def _init_session(self, client: httpx.AsyncClient) -> str:
@@ -29,7 +31,7 @@ class GLPIClient:
         }
         resp = await client.get(f"{self.base_url}/initSession", headers=headers)
         if resp.status_code != 200:
-            raise GLPIAuthError(f"GLPI initSession failed: {resp.status_code} {resp.text}")
+            raise GLPIAuthError(f"GLPI initSession failed: {resp.status_code}")
         self._session_token = resp.json()["session_token"]
         return self._session_token
 
@@ -39,7 +41,7 @@ class GLPIClient:
     async def create_ticket(self, title: str, description: str, urgency: int = 3,
                              category_id: int | None = None) -> dict[str, Any]:
         """Create a GLPI ticket. urgency: 1=Very Low .. 5=Very High."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify) as client:
             if not self._session_token:
                 await self._init_session(client)
             payload = {
@@ -55,7 +57,7 @@ class GLPIClient:
             return resp.json()
 
     async def get_ticket(self, ticket_id: int) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify) as client:
             if not self._session_token:
                 await self._init_session(client)
             resp = await client.get(f"{self.base_url}/Ticket/{ticket_id}", headers=self._headers())
@@ -63,7 +65,7 @@ class GLPIClient:
             return resp.json()
 
     async def list_open_tickets(self, limit: int = 50) -> list[dict]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify) as client:
             if not self._session_token:
                 await self._init_session(client)
             params = {"range": f"0-{limit - 1}", "searchText[status]": "1"}  # status 1 = New

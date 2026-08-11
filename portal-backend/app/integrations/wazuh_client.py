@@ -20,11 +20,13 @@ class WazuhAuthError(Exception):
 
 
 class WazuhClient:
-    def __init__(self, base_url: str, username: str, password: str, timeout: float = 10.0):
+    def __init__(self, base_url: str, username: str, password: str, timeout: float = 10.0,
+                 verify: str | bool = True):
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.timeout = timeout
+        self.verify = verify
         self._token: str | None = None
 
     async def _authenticate(self, client: httpx.AsyncClient) -> str:
@@ -34,7 +36,7 @@ class WazuhClient:
             auth=(self.username, self.password),
         )
         if resp.status_code != 200:
-            raise WazuhAuthError(f"Wazuh authentication failed: {resp.status_code} {resp.text}")
+            raise WazuhAuthError(f"Wazuh authentication failed: {resp.status_code}")
         data = resp.json()
         token = data.get("data", {}).get("token")
         if not token:
@@ -43,7 +45,7 @@ class WazuhClient:
         return token
 
     async def _get(self, path: str, params: dict | None = None) -> dict[str, Any]:
-        async with httpx.AsyncClient(verify=False, timeout=self.timeout) as client:
+        async with httpx.AsyncClient(verify=self.verify, timeout=self.timeout) as client:
             if not self._token:
                 await self._authenticate(client)
             headers = {"Authorization": f"Bearer {self._token}"}

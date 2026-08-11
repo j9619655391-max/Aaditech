@@ -45,6 +45,9 @@ OCS_DB_PASSWORD=$(rand)
 
 # MeshCentral
 MESHCENTRAL_API_KEY=$(rand)
+# MeshCentral device-group ID — filled from the MeshCentral admin UI once a
+# device group exists (per-portal value, cannot be auto-generated).
+MESHCENTRAL_MESH_ID=
 
 # Grafana
 GRAFANA_ADMIN_PASSWORD=$(rand)

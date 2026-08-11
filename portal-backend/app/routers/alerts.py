@@ -19,6 +19,7 @@ def get_wazuh_client() -> WazuhClient:
         base_url=settings.wazuh_api_url,
         username=settings.wazuh_api_user,
         password=settings.wazuh_api_password,
+        verify=settings.tls_verify(),
     )
 
 

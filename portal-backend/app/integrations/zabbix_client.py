@@ -15,10 +15,12 @@ class ZabbixAPIError(Exception):
 
 
 class ZabbixClient:
-    def __init__(self, base_url: str, api_token: str, timeout: float = 10.0):
+    def __init__(self, base_url: str, api_token: str, timeout: float = 10.0,
+                 verify: str | bool = True):
         self.base_url = base_url
         self.api_token = api_token
         self.timeout = timeout
+        self.verify = verify
         self._request_id = 0
 
     async def _call(self, method: str, params: dict[str, Any]) -> Any:
@@ -33,7 +35,7 @@ class ZabbixClient:
             "Content-Type": "application/json-rpc",
             "Authorization": f"Bearer {self.api_token}",
         }
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify) as client:
             resp = await client.post(self.base_url, json=payload, headers=headers)
             resp.raise_for_status()
             body = resp.json()
@@ -63,6 +65,25 @@ class ZabbixClient:
             },
         )
 
+    async def get_active_problems(self, min_severity: int = 2, recent: bool = True) -> list[dict]:
+        """Fetch currently OPEN problems via problem.get (finding 5.2). This is
+        the Zabbix-recommended call for active alerts — it returns one row per
+        unresolved problem with the triggering severity, whereas trigger.get
+        throws in suppressed/ACK-ed noise. Severity: 0=Not classified .. 5=Disaster."""
+        return await self._call(
+            "problem.get",
+            {
+                "output": ["eventid", "objectid", "name", "severity", "clock", "acknowledged"],
+                # recent=1 restricts to problems where the last event is still
+                # in a problem state — no resolved/closed entries.
+                "recent": 1 if recent else 0,
+                "min_severity": min_severity,
+                "selectHosts": ["host"],
+                "sortfield": ["severity", "eventid"],
+                "sortorder": "DESC",
+            },
+        )
+
     async def get_item_history(self, item_id: str, limit: int = 100) -> list[dict]:
         """Fetch recent history points for a metric item (e.g., CPU%, disk I/O) for graphing."""
         return await self._call(
@@ -76,9 +97,35 @@ class ZabbixClient:
             },
         )
 
-    async def get_disk_forecast(self, item_id: str) -> dict:
-        """Wraps Zabbix trend-forecasting; returns estimated time-until-threshold for a disk item."""
-        # In production this triggers a calculated item / expression using Zabbix's
-        # timeleft() function server-side. Placeholder shape documented for frontend contract.
-        history = await self.get_item_history(item_id, limit=50)
-        return {"item_id": item_id, "history_points": len(history), "forecast": "see calculated item"}
+    async def ensure_host_registered(self, host_name: str, visible_name: str | None = None) -> str:
+        """Zabbix auto-registration (finding): ensure an agent-connected host
+        exists. Auto-registration actions create the host server-side, but we
+        make this idempotent so a fresh poller run can't break. Returns the
+        (existing or newly created) host id."""
+        existing = await self._call(
+            "host.get",
+            {
+                "output": ["hostid"],
+                "filter": {"host": [host_name]},
+            },
+        )
+        if existing:
+            return existing[0]["hostid"]
+        created = await self._call(
+            "host.create",
+            {
+                "host": host_name,
+                "status": 0,  # monitored
+                "interfaces": [
+                    {
+                        "type": 1,  # Zabbix agent
+                        "main": 1,
+                        "useip": 1,
+                        "ip": "127.0.0.1",  # passive checks; data arrives via agent
+                        "dns": "",
+                        "port": "10050",
+                    }
+                ],
+            },
+        )
+        return created["hostids"][0]

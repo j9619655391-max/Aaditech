@@ -68,7 +68,7 @@ $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 
 # --- 1. Download Wazuh agent MSI ---
-$wazuhVersion = $config.wazuhAgentVersion   # e.g. "4.14.5"
+$wazuhVersion = $config.wazuhAgentVersion   # e.g. "4.9.0"
 $wazuhUrl = "https://packages.wazuh.com/4.x/windows/wazuh-agent-$wazuhVersion-1.msi"
 $wazuhMsi = "$WorkDir\wazuh-agent-$wazuhVersion-1.msi"
 try {
@@ -80,7 +80,7 @@ try {
 }
 
 # --- 2. Download Zabbix agent 2 MSI ---
-$zbxVersion = $config.zabbixAgentVersion    # e.g. "7.4.3"
+$zbxVersion = $config.zabbixAgentVersion    # e.g. "6.4.20"
 $zbxMajorMinor = ($zbxVersion -split '\.')[0..1] -join '.'
 $zbxUrl = "https://cdn.zabbix.com/zabbix/binaries/stable/$zbxMajorMinor/$zbxVersion/zabbix_agent2-$zbxVersion-windows-amd64-openssl.msi"
 $zbxMsi = "$WorkDir\zabbix_agent2-$zbxVersion-windows-amd64-openssl.msi"

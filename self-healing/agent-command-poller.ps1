@@ -28,14 +28,38 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$PortalBaseUrl,   # e.g. https://portal.aaditech.local
-    [Parameter(Mandatory = $true)][string]$EndpointId,
-    [Parameter(Mandatory = $true)][string]$ServiceToken,
+    [string]$PortalBaseUrl,          # e.g. https://portal.aaditech.local
+    [string]$EndpointId,
+    [string]$ServiceToken,
     [string]$ScriptDir = $PSScriptRoot,
     [string]$LogPath = "$env:ProgramData\Aaditech\logs\agent-command-poller.jsonl"
 )
 
 $ErrorActionPreference = "Stop"
+
+# Prefer explicit params; otherwise fall back to the answer file that
+# install-agent.bat wrote at install time (incl. the self-minted token), so
+# the scheduled task needs no hand-typed arguments at all.
+$answerFile = "$env:ProgramData\Aaditech\AADITECH_ENV.txt"
+if (-not $PortalBaseUrl -or -not $EndpointId -or -not $ServiceToken) {
+    if (-not (Test-Path $answerFile)) {
+        Write-Error "No parameters provided and no $answerFile found. Run install-agent.bat first, or pass -PortalBaseUrl -EndpointId -ServiceToken."
+        exit 1
+    }
+    $envMap = @{}
+    Get-Content $answerFile | ForEach-Object {
+        if ($_ -match '^([^=]+)=(.*)$') { $envMap[$matches[1]] = $matches[2] }
+    }
+    if (-not $PortalBaseUrl) { $PortalBaseUrl = $envMap["PORTAL_BASE_URL"] }
+    if (-not $EndpointId)    { $EndpointId    = $envMap["ENDPOINT_ID"] }
+    if (-not $ServiceToken)  { $ServiceToken  = $envMap["SERVICE_TOKEN"] }
+}
+
+if (-not $PortalBaseUrl -or -not $EndpointId -or -not $ServiceToken) {
+    Write-Error "Missing required values. Got PortalBaseUrl='$PortalBaseUrl' EndpointId='$EndpointId' ServiceToken present=$(-not [string]::IsNullOrEmpty($ServiceToken))."
+    exit 1
+}
+
 $headers = @{ Authorization = "Bearer $ServiceToken" }
 
 function Write-AaditechLog {

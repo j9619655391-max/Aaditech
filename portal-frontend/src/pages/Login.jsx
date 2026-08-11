@@ -12,10 +12,21 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
+    // SSO hands the JWT back as a URL fragment (#token=...) — fragments are
+    // never sent to the server, so the token stays out of proxy/access logs
+    // and Referer headers (finding H8). Query-param form kept for backward
+    // compatibility with older redirects.
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const token = hash.get("token");
     if (token) {
       localStorage.setItem("aaditech_session_token", token);
+      navigate("/", { replace: true });
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const legacy = params.get("token");
+    if (legacy) {
+      localStorage.setItem("aaditech_session_token", legacy);
       navigate("/", { replace: true });
     }
   }, [navigate]);

@@ -158,7 +158,7 @@ def _setup_infra(tmp_path, monkeypatch):
     (tmp_path / "agent-config.json").write_text(
         crypto.encrypt_json(
             {"managerIp": "10.0.0.10", "wazuhEnrollKey": "supersecret",
-             "zabbixServerIp": "10.0.0.10", "zabbixAgentVersion": "7.4.3",
+             "zabbixServerIp": "10.0.0.10", "zabbixAgentVersion": "6.4.20",
              "meshCentralUrl": "https://10.0.0.10:4433", "meshId": ""},
             key,
         )

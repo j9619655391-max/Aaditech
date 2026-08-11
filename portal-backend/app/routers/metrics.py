@@ -11,7 +11,11 @@ router = APIRouter(prefix="/metrics", tags=["metrics"])
 
 
 def get_zabbix_client() -> ZabbixClient:
-    return ZabbixClient(base_url=settings.zabbix_api_url, api_token=settings.zabbix_api_token)
+    return ZabbixClient(
+        base_url=settings.zabbix_api_url,
+        api_token=settings.zabbix_api_token,
+        verify=settings.tls_verify(),
+    )
 
 
 @router.get("/hosts")
@@ -26,7 +30,10 @@ async def active_triggers(
     user: dict = Depends(require_viewer),
 ):
     client = get_zabbix_client()
-    return await client.get_active_triggers(min_severity=min_severity)
+    # Finding 5.2: use problem.get (open problems) — trigger.get returns
+    # suppressed/ACK-ed noise and flag-based attach rows, not a clean list of
+    # things that are actually wrong right now.
+    return await client.get_active_problems(min_severity=min_severity)
 
 
 @router.get("/items/{item_id}/history")
@@ -37,9 +44,3 @@ async def item_history(
 ):
     client = get_zabbix_client()
     return await client.get_item_history(item_id, limit=limit)
-
-
-@router.get("/items/{item_id}/forecast")
-async def disk_forecast(item_id: str, user: dict = Depends(require_viewer)):
-    client = get_zabbix_client()
-    return await client.get_disk_forecast(item_id)

@@ -116,13 +116,24 @@ echo        Install complete.
 REM --- 7. Write the poller answer file -----------------------------------------
 echo [4/5] Writing poller answer file (AADITECH_ENV.txt)...
 if not exist "%ProgramData%\Aaditech" mkdir "%ProgramData%\Aaditech" >nul 2>&1
+REM Self-mint the poller service token (gated by the enroll key the package
+REM already carries) so no one has to hand-paste a token on the endpoint.
+set "SERVICE_TOKEN="
+powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Method Post -Uri '%PORTAL_BASE%/api/agent-installer/self-token' -ContentType 'application/json' -Body ('{\"endpoint_id\":\"%COMPUTERNAME%\",\"enroll_key\":\"%ENROLL_KEY%\"}') -TimeoutSec 30; $r.token } catch { '' }" >token.txt 2>nul
+for /f "usebackq delims=" %%t in ("token.txt") do set "SERVICE_TOKEN=%%t"
+del "token.txt" >nul 2>&1
 (
   echo PORTAL_BASE_URL=%PORTAL_BASE%
   echo ENDPOINT_ID=%COMPUTERNAME%
-  echo SERVICE_TOKEN=
+  echo SERVICE_TOKEN=%SERVICE_TOKEN%
   echo MESH_ID=%MESH_ID%
   echo AGENT_INSTALLED=%date% %time%
 ) > "%ProgramData%\Aaditech\AADITECH_ENV.txt"
+if not defined SERVICE_TOKEN (
+  echo        WARNING: could not self-mint the poller token - paste one manually into AADITECH_ENV.txt.
+) else (
+  echo        Poller service token minted and saved.
+)
 echo        Answer file written to %ProgramData%\Aaditech\AADITECH_ENV.txt
 
 REM --- 8. Done ----------------------------------------------------------------
@@ -130,10 +141,10 @@ echo.
 echo [5/5] Done.
 echo.
 echo Next steps (automated for the fleet via GPO/Intune):
-echo   - Schedule the command poller every 5 minutes:
+echo   - Schedule the command poller every 5 minutes (it reads the endpoint
+echo     ID + self-minted token from AADITECH_ENV.txt, so no args needed):
 echo       schtasks /create /tn "Aaditech Agent Poller" /sc minute /mo 5 ^
-echo         /tr "powershell -ExecutionPolicy Bypass -File \"self-healing\agent-command-poller.ps1\" ^
-echo               -PortalBaseUrl %PORTAL_BASE% -EndpointId %COMPUTERNAME% -ServiceToken ^<token^>"
+echo         /tr "powershell -ExecutionPolicy Bypass -File \"self-healing\agent-command-poller.ps1\""
 echo   - The endpoint Host ID is %COMPUTERNAME% (matches what the portal shows).
 echo   - Verify in the portal:  Security Alerts ^> Agent Health.
 echo.

@@ -13,7 +13,12 @@ router = APIRouter(prefix="/remote", tags=["remote"])
 
 
 def get_mesh_client() -> MeshCentralClient:
-    return MeshCentralClient(base_url=settings.meshcentral_api_url, api_key=settings.meshcentral_api_key)
+    return MeshCentralClient(
+        base_url=settings.meshcentral_api_url,
+        api_key=settings.meshcentral_api_key,
+        verify=settings.tls_verify(),
+        public_url=settings.meshcentral_public_url,
+    )
 
 
 class SessionRequest(BaseModel):
@@ -33,10 +38,17 @@ async def start_session(payload: SessionRequest, user: dict = Depends(require_su
     return result
 
 
+@router.get("/devices")
+async def list_devices(user: dict = Depends(require_support_engineer)):
+    """All managed devices for the portal device picker."""
+    client = get_mesh_client()
+    return await client.list_devices()
+
+
 @router.get("/devices/{device_id}/status")
 async def device_status(device_id: str, user: dict = Depends(require_support_engineer)):
     client = get_mesh_client()
-    return await client.get_device_status(device_id)
+    return await client.device_status(device_id)
 
 
 @router.delete("/session/{session_id}")

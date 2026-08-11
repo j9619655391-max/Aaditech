@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends
+import httpx
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 
 from app.roles import require_viewer
 from app.config import settings
@@ -76,6 +78,32 @@ async def get_embed_url(dashboard_name: str, user: dict = Depends(require_viewer
 
     result = _get_or_refresh(dashboard_name, entry)
     return {"embed_url": result["embed_url"], "expires_at": result["expires_at"]}
+
+
+@router.get("/proxy/{grafana_path:path}")
+async def proxy_grafana(grafana_path: str, request: Request, user: dict = Depends(require_viewer)):
+    """Serves the signed panel-embed URL the frontend iframe loads. The portal
+    backend proxies /api/dashboards/proxy/... to Grafana with the service
+    token, so the Grafana hostname and credentials never reach the browser —
+    the iframe src is always same-origin under /api/ (closes R-5, §7.1.1)."""
+    if not settings.grafana_service_token:
+        return Response(status_code=503, content="grafana_not_configured")
+    target_url = f"{settings.grafana_url.rstrip('/')}/{grafana_path}"
+    headers = {
+        "Authorization": f"Bearer {settings.grafana_service_token}",
+        "Accept": request.headers.get("accept", "*/*"),
+    }
+    async with httpx.AsyncClient(verify=settings.tls_verify(), timeout=20.0) as client:
+        resp = await client.get(target_url, params=request.query_params, headers=headers)
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers={
+            "Content-Type": resp.headers.get("content-type", "text/html; charset=utf-8"),
+            # Allow the portal page (which loads us) to frame it.
+            "X-Frame-Options": "ALLOWALL",
+        },
+    )
 
 
 @router.post("/embed/{dashboard_name}/report-failure")

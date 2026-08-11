@@ -68,6 +68,12 @@
     <div class="hint">The IP endpoints reach this server on — used for agents,
       MeshCentral and the portal URL. Detected automatically on most hosts.</div>
 
+    <label for="meshId">MeshCentral device-group ID (optional)</label>
+    <input id="meshId" placeholder="leave blank for now — set after creating the group" />
+    <div class="hint">Found in your MeshCentral admin UI once a device group
+      exists. Leave blank during first setup; you can set it later in
+      infra/.env (MESHCENTRAL_MESH_ID).</div>
+
     <section class="channel">
       <label class="channel-title">Notification — Email (optional)</label>
       <label for="provider">Email provider</label>
@@ -224,6 +230,7 @@
       admin_username: $("username").value,
       admin_password: $("password").value,
       local_ip: $("ip").value,
+      mesh_id: $("meshId").value.trim(),
       email: emailFields,
       telegram: {
         bot_token: $("tgToken").value.trim(),

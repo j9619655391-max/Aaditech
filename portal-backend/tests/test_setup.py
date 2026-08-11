@@ -59,11 +59,13 @@ def test_provision_generates_config_and_admin(setup_env):
     assert body["smtp"] == {"host": "smtp.hostinger.com", "port": 465, "tls": "ssl"}
 
     env = (setup_env / ".env").read_text()
-    assert "COMPANY_NAME=Acme Corp" in env
+    # Values containing spaces/#/= are double-quoted so they can't corrupt .env.
+    assert 'COMPANY_NAME="Acme Corp"' in env
     assert "PORTAL_IP=10.73.77.58" in env
     assert "ADMIN_USERNAME=boss" in env
     assert "SMTP_HOST=smtp.hostinger.com" in env
     assert "SMTP_PASSWORD=mailbox-pass" in env
+    assert "WAZUH_API_USER=aaditech-portal-svc" in env  # H7 — wizard writes it
     # Existing secrets are preserved
     assert "JWT_SECRET=abc" in env
 
@@ -75,6 +77,10 @@ def test_provision_generates_config_and_admin(setup_env):
     assert agent_cfg["zabbixServerIp"] == "10.73.77.58"
     assert agent_cfg["wazuhEnrollKey"] == "preseed-key"
     assert agent_cfg["meshCentralUrl"] == "https://10.73.77.58:4433"
+    # Versions pinned to match the deployed servers (wazuh 4.9.0 / zabbix 6.4).
+    assert agent_cfg["wazuhAgentVersion"] == "4.9.0"
+    assert agent_cfg["zabbixAgentVersion"] == "6.4.20"
+    assert agent_cfg["meshId"] == ""
 
     assert (setup_env / ".provisioned").exists()
 
@@ -88,6 +94,51 @@ def test_provision_only_runs_once(setup_env):
     resp = client.post("/api/setup/provision", json=VALID_PAYLOAD)
     assert resp.status_code == 409
     assert resp.json()["configured"] is True
+
+
+def test_provision_collects_mesh_id(setup_env):
+    """The optional MeshCentral device-group ID is persisted to .env AND
+    written into the encrypted agent-config.json (H3 fix)."""
+    payload = {**VALID_PAYLOAD, "mesh_id": "grp-42"}
+    resp = client.post("/api/setup/provision", json=payload)
+    assert resp.status_code == 200
+
+    env = (setup_env / ".env").read_text()
+    assert "MESHCENTRAL_MESH_ID=grp-42" in env
+
+    agent_cfg = crypto.decrypt_json(
+        (setup_env / "agent-config.json").read_text(),
+        [l for l in env.splitlines() if l.startswith("AGENT_CONFIG_KEY=")][0].split("=", 1)[1],
+    )
+    assert agent_cfg["meshId"] == "grp-42"
+
+
+def test_provision_preserves_existing_mesh_id(setup_env):
+    """A mesh ID already present in infra/.env survives the wizard even when
+    the payload omits it."""
+    (setup_env / ".env").write_text(
+        (setup_env / ".env").read_text() + "MESHCENTRAL_MESH_ID=grp-7\n"
+    )
+    resp = client.post("/api/setup/provision", json=VALID_PAYLOAD)
+    assert resp.status_code == 200
+    env = (setup_env / ".env").read_text()
+    assert "MESHCENTRAL_MESH_ID=grp-7" in env
+
+
+def test_env_values_with_special_chars_are_quoted(setup_env):
+    """5.7 fix — a password/webhook containing '#', '=' or whitespace must not
+    corrupt infra/.env and must round-trip through _load_env un-altered."""
+    payload = {**VALID_PAYLOAD, "teams": {"webhook_url": "https://x.com?id=1#frag"}}
+    resp = client.post("/api/setup/provision", json=payload)
+    assert resp.status_code == 200
+
+    env_text = (setup_env / ".env").read_text()
+    assert 'TEAMS_WEBHOOK_URL="https://x.com?id=1#frag"' in env_text
+
+    reloaded = next(
+        l for l in env_text.splitlines() if l.startswith("TEAMS_WEBHOOK_URL=")
+    ).split("=", 1)[1].strip()
+    assert reloaded == '"https://x.com?id=1#frag"'
 
 
 def test_provision_rejects_bad_ip(setup_env):

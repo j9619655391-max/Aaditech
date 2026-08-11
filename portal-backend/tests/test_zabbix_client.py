@@ -53,6 +53,21 @@ async def test_active_triggers_severity_param():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_active_problems_uses_problem_get():
+    route = respx.post(BASE_URL).mock(
+        return_value=Response(200, json={"jsonrpc": "2.0", "result": [], "id": 1})
+    )
+    client = ZabbixClient(BASE_URL, "tok")
+    await client.get_active_problems(min_severity=3)
+
+    sent_body = route.calls.last.request.content
+    assert b'"problem.get"' in sent_body
+    assert b'"min_severity": 3' in sent_body
+    assert b'"recent"' in sent_body
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_request_id_increments():
     respx.post(BASE_URL).mock(return_value=Response(200, json={"jsonrpc": "2.0", "result": [], "id": 1}))
     client = ZabbixClient(BASE_URL, "tok")

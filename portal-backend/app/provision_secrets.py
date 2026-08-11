@@ -69,6 +69,9 @@ NON_SECRET_KEYS: list[str] = [
     "QUARANTINE_NETWORK_SHARE",
     "GITHUB_BUILD_PAT",
     "GITHUB_REPO",
+    # MeshCentral device-group ID (assigned by the MeshCentral admin UI once
+    # a device group exists — operator-provided, cannot be auto-generated).
+    "MESHCENTRAL_MESH_ID",
 ]
 
 
@@ -94,7 +97,7 @@ def blank_env() -> str:
     for key in SECRET_KEYS + NON_SECRET_KEYS:
         value = "587" if key == "SMTP_PORT" else ""
         lines.append(f"{key}={value}")
-    lines.append("WAZUH_AGENT_VERSION=4.14.5")
-    lines.append("ZABBIX_AGENT_VERSION=7.4.3")
+    lines.append("WAZUH_AGENT_VERSION=4.9.0")
+    lines.append("ZABBIX_AGENT_VERSION=6.4.20")
     lines.append("")
     return "\n".join(lines)

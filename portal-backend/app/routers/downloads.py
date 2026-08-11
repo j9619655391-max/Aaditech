@@ -160,6 +160,34 @@ async def mint_agent_token(
     return {"endpoint_id": endpoint_id, "token": token, "expiry_days": 365}
 
 
+@router.post("/self-token")
+async def self_token(payload: dict):
+    """Self-service poller token: install-agent.bat calls this during setup so
+    the poller runs without an admin pasting a token. Gated by the deployment's
+    enroll key (carried in the one-click package) — a machine that can present
+    the key is a real member of this fleet. Returns the token, which the .bat
+    writes into AADITECH_ENV.txt. Closes the manual-token finding: the poller
+    credential is provisioned at INSTALL time, exactly once, like everything
+    else in the one-click flow."""
+    enroll_key = str(payload.get("enroll_key") or "")
+    endpoint_id = str(payload.get("endpoint_id") or "").strip()
+    if not endpoint_id:
+        raise HTTPException(status_code=400, detail="endpoint_id is required")
+
+    try:
+        cfg = _read_agent_config()
+    except HTTPException:
+        raise HTTPException(status_code=503, detail="agent_config_unavailable")
+    # Constant-time compare — don't leak the key via timing.
+    import secrets as _secrets
+
+    if not enroll_key or not _secrets.compare_digest(enroll_key, cfg.get("wazuhEnrollKey", "")):
+        raise HTTPException(status_code=403, detail="invalid enroll key")
+
+    token = create_service_token(endpoint_id, ["viewer"])
+    return {"endpoint_id": endpoint_id, "token": token, "expiry_days": 365}
+
+
 @router.post("/upload")
 async def upload_installer(file: UploadFile, user: dict = Depends(require_cleanup_approver)):
     """Accept a .exe built locally on a Windows admin machine (the "Create
@@ -199,7 +227,7 @@ async def _trigger_workflow(ref: str = "main") -> None:
         resp = await client.post(
             url,
             headers=_gh_headers(),
-            json={"ref": ref, "inputs": {"wazuh_version": "4.14.5", "zabbix_version": "7.4.3"}},
+            json={"ref": ref, "inputs": {"wazuh_version": "4.9.0", "zabbix_version": "6.4.20"}},
         )
     if resp.status_code == 204:
         return

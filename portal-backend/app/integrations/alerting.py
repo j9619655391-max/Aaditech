@@ -34,7 +34,6 @@ from email.mime.text import MIMEText
 
 import httpx
 
-from app import ms_oauth
 from app.config import settings
 
 
@@ -158,28 +157,6 @@ def send_smtp_email(subject: str, body: str, recipients: list[str]) -> bool:
                 server.login(settings.smtp_username, settings.smtp_password)
                 server.sendmail(settings.smtp_from_address, recipients, msg.as_string())
         return True
-    except Exception:
-        # Reporting channel — a failure here is observable but not critical.
-        return False
-
-
-async def send_report_email(subject: str, body: str, recipients: list[str]) -> bool:
-    """
-    Sends a SECONDARY-channel scheduled report/digest. Uses the setup wizard's
-    SMTP channel if configured; falls back to Microsoft Graph (/sendMail) when
-    Azure is configured instead. NEVER call this for time-sensitive alerts —
-    use send_alert() instead (see module docstring).
-    """
-    if smtp_configured():
-        return send_smtp_email(subject, body, recipients)
-
-    if not ms_oauth.azure_configured():
-        # Fails soft — this is explicitly NOT on the critical alerting path
-        # (§3.6). No config => nothing to send.
-        return False
-
-    try:
-        return ms_oauth.send_graph_email(subject, body, recipients)
     except Exception:
         # Reporting channel — a failure here is observable but not critical.
         return False
